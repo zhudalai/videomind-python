@@ -33,6 +33,35 @@ from videomind.observability.instrumentation import trace_stage, traced_span
 logger = get_task_logger(__name__)
 
 
+async def _set_media_status(media_id_str: str, status: str) -> None:
+    """把 media_file.status 落库到 PG，让 HTTP/SSE 轮询能看到推进。
+
+    download→downloaded 由 download_video_task 直接写（附带元数据），
+    其余 stage（transcode/asr/ocr）只更新 status；index→ready 由 Indexer.index 内部写。
+    仅在向前推进时写，避免回退或覆盖终态（ready/failed）。
+    """
+    from videomind.infrastructure.storage import models as m
+    from videomind.infrastructure.storage.database import db_session
+
+    _advance = {
+        "pending": 0, "downloading": 1, "downloaded": 2,
+        "transcoding": 3, "transcoded": 4,
+        "asr": 5, "asr_done": 6,
+        "ocr": 7, "ocr_done": 8, "indexing": 9, "ready": 10,
+        "failed": -1,
+    }
+    async with db_session() as db:
+        media = await db.get(m.MediaFile, uuid.UUID(media_id_str))
+        if media is None:
+            return
+        cur = _advance.get(media.status, 0)
+        nxt = _advance.get(status, 0)
+        # 只允许向前推进；ready/failed 后不再覆盖
+        if nxt > cur and media.status not in ("ready", "failed"):
+            media.status = status
+            await db.commit()
+
+
 # ──────────────────────────── 状态上下文 ────────────────────────────
 
 
@@ -261,11 +290,14 @@ def transcode_video_task(self, context: dict) -> dict:
     """
     import anyio
     from videomind.core.video_pipeline.transcode import get_transcoder
+    from videomind.infrastructure.storage.database import db_session
+    from videomind.infrastructure.storage import models as m
 
     ctx = IngestionContext.from_dict(context)
     ctx.current_stage = "transcoding"
     ctx.progress_pct = 30
     anyio.run(broadcast_progress, ctx.media_id, "transcoding", 30, "开始转码")
+    anyio.run(_set_media_status, ctx.media_id, "transcoding")
 
     async def _run() -> IngestionContext:
         dl = ctx.download_result
@@ -288,6 +320,17 @@ def transcode_video_task(self, context: dict) -> dict:
                 }
                 ctx.current_stage = "transcoded"
                 ctx.progress_pct = 40
+                # ffmpeg probe 完才回填 media_file 元数据（download 路径如 skip 时未填）
+                if result.duration_ms is not None:
+                    async with db_session() as db:
+                        media = await db.get(m.MediaFile, uuid.UUID(ctx.media_id))
+                        if media is not None and media.duration_ms is None:
+                            media.duration_ms = result.duration_ms
+                            media.width = result.width
+                            media.height = result.height
+                            media.fps = result.fps
+                            await db.commit()
+                await _set_media_status(ctx.media_id, "transcoded")
                 await broadcast_progress(ctx.media_id, "transcoded", 40, "转码完成")
                 return ctx
 
@@ -319,6 +362,7 @@ def asr_task(self, context: dict) -> dict:
     ctx.current_stage = "asr"
     ctx.progress_pct = 50
     anyio.run(broadcast_progress, ctx.media_id, "asr", 50, "开始语音识别")
+    anyio.run(_set_media_status, ctx.media_id, "asr")
 
     async def _run() -> IngestionContext:
         tc = ctx.transcode_result
@@ -347,6 +391,7 @@ def asr_task(self, context: dict) -> dict:
 
         ctx.current_stage = "asr_done"
         ctx.progress_pct = 60
+        await _set_media_status(ctx.media_id, "asr_done")
         await broadcast_progress(ctx.media_id, "asr", 60, "语音识别完成")
         return ctx
 
@@ -376,6 +421,7 @@ def ocr_task(self, context: dict) -> dict:
     ctx.current_stage = "ocr"
     ctx.progress_pct = 70
     anyio.run(broadcast_progress, ctx.media_id, "ocr", 70, "开始 OCR 识别")
+    anyio.run(_set_media_status, ctx.media_id, "ocr")
 
     async def _run() -> IngestionContext:
         tc = ctx.transcode_result
@@ -409,6 +455,7 @@ def ocr_task(self, context: dict) -> dict:
 
         ctx.current_stage = "ocr_done"
         ctx.progress_pct = 75
+        await _set_media_status(ctx.media_id, "ocr_done")
         await broadcast_progress(ctx.media_id, "ocr", 75, "OCR 完成（已降级）" if not results else "OCR 完成")
         return ctx
 
