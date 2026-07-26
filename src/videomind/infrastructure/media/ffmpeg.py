@@ -60,7 +60,7 @@ class FFmpegWrapper:
 
         def _do() -> str:
             import subprocess
-            r = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', check=True)
             return r.stdout
 
         out = await anyio.to_thread.run_sync(_do)
@@ -152,7 +152,7 @@ class FFmpegWrapper:
     async def _run(self, cmd: list[str]) -> None:
         def _do() -> None:
             import subprocess
-            r = subprocess.run(cmd, capture_output=True, text=True)
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
             if r.returncode != 0:
                 raise RuntimeError(
                     f"FFmpeg failed (exit {r.returncode}):\n"

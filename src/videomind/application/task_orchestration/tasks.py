@@ -60,7 +60,11 @@ class IngestionContext:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "IngestionContext":
-        return cls(**data)
+        # Filter out unknown fields for forward compatibility
+        import dataclasses
+        known_fields = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in known_fields}
+        return cls(**filtered)
 
 
 # ──────────────────────────── 基础 Task 类 ────────────────────────────

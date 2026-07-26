@@ -28,6 +28,7 @@ class MinioClient:
     """MinIO 客户端封装：bucket 初始化 + 上传 / 下载 / 删除。
 
     所有 IO 操作通过 anyio.to_thread 让出事件循环，不阻塞 asyncio。
+    Bucket 从 settings 实时读取（不缓存），以便测试时切换 bucket。
     """
 
     def __init__(self) -> None:
@@ -38,16 +39,21 @@ class MinioClient:
             secret_key=s.minio_secret_key,
             secure=s.minio_secure,
         )
-        self._bucket = s.minio_bucket
+
+    @property
+    def _bucket(self) -> str:
+        """实时从 settings 读取 bucket，避免单例缓存导致测试隔离失效。"""
+        return get_settings().minio_bucket
 
     async def ensure_bucket(self) -> None:
         """启动时确保 bucket 存在（幂等）。"""
+        bucket = self._bucket
         exists = await anyio.to_thread.run_sync(
-            self._client.bucket_exists, self._bucket
+            self._client.bucket_exists, bucket
         )
         if not exists:
             await anyio.to_thread.run_sync(
-                self._client.make_bucket, self._bucket
+                self._client.make_bucket, bucket
             )
 
     async def upload_file(self, object_key: str, file_path: str | Path) -> str:

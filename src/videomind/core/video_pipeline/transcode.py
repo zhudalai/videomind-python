@@ -67,21 +67,22 @@ class Transcoder:
         self._ffmpeg = get_ffmpeg()
         self._minio = get_minio_client()
 
-    async def execute(self, video_local: Path, content_hash: str) -> TranscodeResult:
+    async def execute(self, video_local: Path | str, content_hash: str) -> TranscodeResult:
         """执行转码/分段流程。
 
         Args:
-            video_local: 下载器产出的本地视频路径
+            video_local: 下载器产出的本地视频路径（Path 或 str）
             content_hash: 内容 SHA256（MinIO 对象键前缀用）
 
         Returns:
             TranscodeResult，包含本地/MinIO 双路径
         """
+        video_path = Path(video_local)
         # 确保 bucket 存在
         await self._minio.ensure_bucket()
 
         # 1. ffprobe 探测元信息
-        probe = await self._ffmpeg.probe(video_local)
+        probe = await self._ffmpeg.probe(video_path)
 
         # 2. 抽音：16kHz mono OGG
         audio_name = f"{content_hash}/audio.ogg"
@@ -123,12 +124,13 @@ class Transcoder:
             fps=probe.fps,
         )
 
-    async def _detect_scene_changes(self, video_path: Path) -> list[int]:
+    async def _detect_scene_changes(self, video_path: Path | str) -> list[int]:
         """场景变化检测（感知哈希差异）。
 
         这里简化实现：用 ffmpeg 输出 1fps 帧，逐帧计算 phash 差异。
         返回场景切换时间点列表（毫秒）。
         """
+        video_path = Path(video_path)
         # 复用抽帧结果
         frames_dir = self._temp_dir / f"_scene_{video_path.stem}"
         frames_dir.mkdir(parents=True, exist_ok=True)

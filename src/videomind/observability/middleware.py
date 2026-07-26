@@ -39,9 +39,9 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         # 简单规则：UUID、数字 ID 替换为占位符
         import re
 
-        # UUID 替换
+        # UUID 替换 (case-insensitive for hex)
         path = re.sub(
-            r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
             "/{id}",
             path,
         )

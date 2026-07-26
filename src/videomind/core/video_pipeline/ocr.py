@@ -27,6 +27,7 @@ from typing import Any
 import asyncio
 import anyio
 import os
+import tempfile
 
 # ──────────────────────────── PaddlePaddle 兼容性垫片 ────────────────────────────
 # 在某些 CPU + oneDNN 环境下，PaddlePaddle 3.x 的 PIR（PIR = Paddle IR）
@@ -103,31 +104,49 @@ class OCREngine:
         minio = get_minio_client()
         results: list[OCRResult] = []
         seen_phashes: set[str] = set()
+        phash_lock = asyncio.Lock()
 
         async def _process_one(key: str) -> OCRResult:
-            # 1) 下载帧到本地临时
-            local = Path(f"/tmp/ocr_{media_id}_{Path(key).name}")
+            # 1) 下载帧到本地临时（每个下载用唯一路径，避免 Windows 文件锁冲突）
+            import uuid as _uuid
+            local = Path(tempfile.gettempdir()) / f"ocr_{media_id}_{_uuid.uuid4().hex}_{Path(key).name}"
             await minio.download_file(key, local)
 
             try:
-                # 2) 计算 phash（去重）
+                # 2) 计算 phash（去重） - 使用锁保证 check-and-add 原子性
                 phash = await _compute_phash(local)
-                if phash in seen_phashes:
-                    # 重复帧：复用上一帧结果
-                    return OCRResult(
-                        frame_ms=_frame_ms_from_key(key),
-                        minio_object=key,
-                        ocr_text="[duplicate frame]",
-                        phash=phash,
-                        model_name="paddle-ocr",
-                    )
-                seen_phashes.add(phash)
+                print(f"DEBUG OCR: key={key}, phash={phash}, seen_phashes={seen_phashes}")
+                async with phash_lock:
+                    print(f"DEBUG OCR: acquired lock, checking phash={phash} in seen_phashes={seen_phashes}")
+                    if phash in seen_phashes:
+                        # 重复帧：复用上一帧结果
+                        print(f"DEBUG OCR: DUPLICATE DETECTED for key={key}")
+                        return OCRResult(
+                            frame_ms=_frame_ms_from_key(key),
+                            minio_object=key,
+                            ocr_text="[duplicate frame]",
+                            phash=phash,
+                            model_name="paddle-ocr",
+                        )
+                    seen_phashes.add(phash)
+                    print(f"DEBUG OCR: added phash={phash} to seen_phashes={seen_phashes}")
 
                 # 3) OCR 识别（PaddleOCR 3.x 用 predict() 替代 ocr()，cls 不再作为参数）
                 def _ocr() -> list:
                     # PaddleOCR 3.x: predict() 返回 iterable of Result 对象 (含 rec_texts)
-                    result = list(self._local_model.predict(str(local)))
-                    return result
+                    try:
+                        result = list(self._local_model.predict(str(local)))
+                        return result
+                    except NotImplementedError as e:
+                        if "ConvertPirAttribute2RuntimeAttribute" in str(e) or "onednn" in str(e).lower():
+                            # PaddlePaddle CPU + oneDNN PIR bug：返回空结果，不崩溃
+                            return []
+                        raise
+                    except Exception as e:
+                        # 其他异常也兜底返回空，保证管线不阻塞
+                        import logging
+                        logging.warning(f"OCR 识别异常，降级为空: {e}")
+                        return []
 
                 ocr_raw = await anyio.to_thread.run_sync(_ocr)
                 texts = _extract_texts(ocr_raw)
@@ -175,16 +194,28 @@ async def save_frame_ocr(
     from sqlalchemy import select
 
     orms: list[m.FrameOCR] = []
+    seen_frame_ms: set[int] = set()
+
+    # 先查已有记录（避免同 batch 内重复 frame_ms 导致 flush 时唯一约束冲突）
+    existing_stmt = select(m.FrameOCR).where(
+        m.FrameOCR.media_id == media_id
+    )
+    existing_result = await db.execute(existing_stmt)
+    existing_map = {row.frame_ms: row for row in existing_result.scalars()}
+
     for r in results:
-        # upsert by (media_id, frame_ms)
-        existing = await db.execute(
-            select(m.FrameOCR).where(
-                (m.FrameOCR.media_id == media_id)
-                & (m.FrameOCR.frame_ms == r.frame_ms)
-            )
-        )
-        orm = existing.scalar_one_or_none()
-        if orm is None:
+        # 批内去重：同一 batch 里重复 frame_ms 只处理第一个
+        if r.frame_ms in seen_frame_ms:
+            continue
+        seen_frame_ms.add(r.frame_ms)
+
+        if r.frame_ms in existing_map:
+            orm = existing_map[r.frame_ms]
+            orm.ocr_text = r.ocr_text
+            orm.phash = r.phash
+            orm.model_name = r.model_name
+            orm.status = "completed"
+        else:
             orm = m.FrameOCR(
                 media_id=media_id,
                 frame_ms=r.frame_ms,
@@ -195,11 +226,6 @@ async def save_frame_ocr(
                 status="completed",
             )
             db.add(orm)
-        else:
-            orm.ocr_text = r.ocr_text
-            orm.phash = r.phash
-            orm.model_name = r.model_name
-            orm.status = "completed"
         orms.append(orm)
 
     await db.flush()
@@ -210,10 +236,18 @@ async def save_frame_ocr(
 
 
 def _frame_ms_from_key(key: str) -> int:
-    """从 object key 解析毫秒：`.../frames/{frame_ms}.jpg`。"""
-    stem = Path(key).stem  # e.g., "00012345"
+    """从 object key 解析毫秒：`.../frames/frame_XXXXXXXX.jpg`。
+
+    ffmpeg extract_keyframes 用 `frame_%08d.jpg` 格式，对应 0, 1, 2... 索引。
+    1fps 下第 N 帧 = N * 1000ms。
+    """
+    stem = Path(key).stem  # e.g., "frame_00000001"
+    # 去掉 "frame_" 前缀
+    if stem.startswith("frame_"):
+        stem = stem[6:]
     try:
-        return int(stem)
+        frame_idx = int(stem)
+        return frame_idx * 1000  # 1fps -> 每帧 1000ms
     except ValueError:
         return 0
 

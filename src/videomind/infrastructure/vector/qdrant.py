@@ -154,6 +154,23 @@ class QdrantStore:
         )
         return r.count
 
+    async def retrieve(
+        self,
+        *,
+        collection_name: str | None = None,
+        ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """按 ID 批量获取 points。"""
+        coll = collection_name or self._collection
+        res = await self._client.retrieve(collection_name=coll, ids=ids, with_payload=True)
+        return [
+            {
+                "id": p.id,
+                "payload": p.payload,
+            }
+            for p in res
+        ]
+
     async def close(self) -> None:
         await self._client.close()
 

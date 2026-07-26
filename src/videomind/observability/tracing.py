@@ -24,6 +24,7 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -38,9 +39,15 @@ _current_span: ContextVar[Optional[trace.Span]] = ContextVar("_current_span", de
 
 def get_current_trace_id() -> Optional[str]:
     """获取当前 Span 的 trace_id（16进制字符串），用于日志关联。"""
+    # 先检查自定义 context var（用于 TracedSpan 上下文管理器）
     span = _current_span.get()
     if span and span.get_span_context().trace_id:
         return format(span.get_span_context().trace_id, "032x")
+    # 回退到 OpenTelemetry 标准当前 span
+    current_span = trace.get_current_span()
+    ctx = current_span.get_span_context()
+    if ctx and ctx.trace_id:
+        return format(ctx.trace_id, "032x")
     return None
 
 
@@ -174,12 +181,22 @@ def traced_span(
 
 def inject_trace_context(carrier: dict) -> None:
     """将当前 trace context 注入 carrier（用于 Celery 任务 headers 传递）。"""
-    trace.get_tracer_provider().get_tracer("videomind").inject(carrier)
+    # 获取当前 span 并设置到上下文中，然后注入
+    current_span = trace.get_current_span()
+    ctx = trace.set_span_in_context(current_span)
+    inject(carrier, context=ctx)
 
 
 def extract_trace_context(carrier: dict) -> trace.SpanContext | None:
     """从 carrier 提取 trace context（用于 Celery worker 端恢复）。"""
-    return trace.get_tracer_provider().get_tracer("videomind").extract(carrier)
+    # 从 carrier 提取上下文
+    ctx = extract(carrier)
+    # 从提取的上下文中获取当前 span 的上下文
+    span = trace.get_current_span(ctx)
+    span_ctx = span.get_span_context()
+    if span_ctx and span_ctx.is_valid:
+        return span_ctx
+    return None
 
 
 # 初始化 structlog
