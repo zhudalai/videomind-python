@@ -43,6 +43,14 @@ class IngestionContext:
     media_id: str
     source_url: str
     user_id: str | None = None
+    # 上传场景：skip_download=True 时，pipeline_task 直接进 transcode（绕开 yt-dlp），
+    # materialize_local_for_upload_task 负责把 MinIO 上传文件拉到本地 transcode 工作目录。
+    skip_download: bool = False
+    source_type: str = "url"          # 'url' | 'upload'
+    content_hash: str | None = None   # 上传场景必填
+    minio_bucket: str | None = None   # 上传场景必填
+    minio_object: str | None = None   # 上传场景必填
+    upload_filename: str | None = None
     # 阶段产出
     download_result: dict[str, Any] | None = None  # {local_path, content_hash, meta}
     transcode_result: dict[str, Any] | None = None  # {audio_minio, keyframes_minio, meta}
@@ -121,13 +129,18 @@ class BaseVideoTask(celery_app.Task):
     default_retry_delay=60,
 )
 def download_video_task(self, context: dict) -> dict:
-    """阶段 1：下载视频（yt-dlp）。
+    """阶段 1：把"待处理源视频"落到本地工作目录。
 
-    输入: context.media_id, context.source_url
-    产出: context.download_result = {local_path, content_hash, duration_ms, width, height, fps}
+    两条分支：
+      a) URL 路径（默认）：yt-dlp 拉视频 → MinIO → 写 ctx.download_result（带媒体元数据）
+      b) 上传路径（skip_download=True）：把 MinIO 中已上传文件拉到本地 → 写 ctx.download_result
+
+    输入: context.media_id, context.source_url, context.skip_download,
+          context.minio_bucket/object_key/content_hash（仅 upload 路径用）
+    产出: context.download_result = {local_path, content_hash, minio_object}
+          以及可选的 duration_ms/width/height/fps（仅 URL 路径）
     """
     import anyio
-    from videomind.core.video_pipeline.download import get_downloader
     from videomind.infrastructure.storage.database import db_session
     from videomind.infrastructure.storage import models as m
     from videomind.infrastructure.media.minio import get_minio_client
@@ -135,9 +148,15 @@ def download_video_task(self, context: dict) -> dict:
     ctx = IngestionContext.from_dict(context)
     ctx.current_stage = "downloading"
     ctx.progress_pct = 10
-    anyio.run(broadcast_progress, ctx.media_id, "downloading", 10, "开始下载")
+    anyio.run(broadcast_progress, ctx.media_id, "downloading", 10, "开始准备源文件")
 
     async def _run() -> IngestionContext:
+        if ctx.skip_download:
+            return await _materialize_uploaded_for_transcode(ctx)
+
+        # URL 路径走 yt-dlp
+        from videomind.core.video_pipeline.download import get_downloader
+
         with trace_stage("download", ctx.media_id):
             with traced_span("pipeline.download", attributes={"media_id": ctx.media_id}):
                 downloader = get_downloader()
@@ -174,6 +193,54 @@ def download_video_task(self, context: dict) -> dict:
                 ctx.current_stage = "downloaded"
                 ctx.progress_pct = 20
                 await broadcast_progress(ctx.media_id, "downloaded", 20, "下载完成")
+                return ctx
+
+    async def _materialize_uploaded_for_transcode(ctx: IngestionContext) -> IngestionContext:
+        """上传路径：把 MinIO 中的对象拉到 transcode 工作目录。
+
+        - 元数据 (duration_ms/width/height/fps) 由 transcode_video_task 用 ffmpeg probe 重新填，
+          本任务只负责"把文件搬到本地"和"标记 media_file.status='downloaded'"。
+        """
+        from pathlib import Path
+        from videomind.config import get_settings
+
+        settings = get_settings()
+        bucket = ctx.minio_bucket or settings.minio_bucket
+        object_key = ctx.minio_object
+        content_hash = ctx.content_hash
+        if not (object_key and content_hash):
+            raise ValueError(
+                "skip_download=True 但 minio_object/content_hash 缺失；上传 endpoint 必须填齐"
+            )
+
+        # 工作目录：/tmp/transcode_{media_id[:8]}/original.mp4（与 download 同布局，transcode 兼容）
+        workdir = Path(f"/tmp/transcode_{ctx.media_id[:8]}")
+        workdir.mkdir(parents=True, exist_ok=True)
+        local_path = workdir / "original.mp4"
+
+        with trace_stage("materialize_upload", ctx.media_id):
+            with traced_span("pipeline.materialize_upload", attributes={"media_id": ctx.media_id, "object_key": object_key}):
+                minio = get_minio_client()
+                await minio.download_file(object_key, local_path)
+
+                async with db_session() as db:
+                    media = await db.get(m.MediaFile, uuid.UUID(ctx.media_id))
+                    if media:
+                        media.status = "downloaded"
+                        media.minio_bucket = bucket
+                        media.minio_object = object_key
+                        media.file_size = local_path.stat().st_size
+                        await db.commit()
+
+                ctx.download_result = {
+                    "local_path": str(local_path),
+                    "content_hash": content_hash,
+                    "minio_object": object_key,
+                    # duration_ms/width/height/fps 由 transcode 阶段 ffmpeg probe 填
+                }
+                ctx.current_stage = "downloaded"
+                ctx.progress_pct = 20
+                await broadcast_progress(ctx.media_id, "downloaded", 20, "已就绪上传文件")
                 return ctx
 
     return anyio.run(_run).to_dict()

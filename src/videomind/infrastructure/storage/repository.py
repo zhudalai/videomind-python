@@ -88,6 +88,63 @@ async def create_media_file_pending(
     return media
 
 
+async def create_media_file_from_upload(
+    db: AsyncSession,
+    *,
+    content_hash: str,
+    filename: str,
+    mime_type: str,
+    file_size: int,
+    bucket: str,
+    object_key: str,
+    user_id: uuid.UUID | None = None,
+) -> m.MediaFile:
+    """为本地文件上传创建 media_file 记录（单条插入路径，幂等 by content_hash）。
+
+    与 create_media_file_pending 的差别（URL 路径）：
+    - source_type = 'upload'（而非 'url'）
+    - source_url = None（上传场景无 URL）
+    - content_hash 由上传字节算出（已是真 SHA256，不重算）
+    - filename 来自客户端原始上传名
+    - file_size 为真实上传字节数（非 0）
+    - minio_bucket / minio_object 由调用方指定（已落到对象存储）
+
+    返回：ORM 实例。commit 由调用方负责。
+    """
+    from sqlalchemy.dialects.postgresql import insert
+
+    safe_filename = (filename or "upload.bin")[:256]
+
+    stmt = (
+        insert(m.MediaFile)
+        .values(
+            user_id=user_id,
+            source_type="upload",
+            source_url=None,
+            content_hash=content_hash,
+            filename=safe_filename,
+            mime_type=mime_type,
+            file_size=file_size,
+            minio_bucket=bucket,
+            minio_object=object_key,
+            status="pending",
+        )
+        .on_conflict_do_nothing(index_elements=[m.MediaFile.content_hash])
+        .returning(m.MediaFile)
+    )
+    result = await db.execute(stmt)
+    media = result.scalar_one_or_none()
+
+    if media is None:
+        # 冲突已存在行 → 取回已有记录
+        existing = await get_media_by_hash(db, content_hash)
+        if existing:
+            return existing
+        raise RuntimeError("Failed to create or fetch media_file")
+
+    return media
+
+
 async def list_media_by_user(
     db: AsyncSession, user_id: uuid.UUID, *, limit: int = 20, offset: int = 0
 ) -> Sequence[m.MediaFile]:

@@ -308,6 +308,8 @@ class TestIngestionContextDataclassIntegrity:
         data = ctx.to_dict()
         expected_fields = {
             "media_id", "source_url", "user_id",
+            "skip_download", "source_type",
+            "content_hash", "minio_bucket", "minio_object", "upload_filename",
             "download_result", "transcode_result",
             "transcription_id", "asr_chunks_count",
             "ocr_frames_count", "chunk_count",
