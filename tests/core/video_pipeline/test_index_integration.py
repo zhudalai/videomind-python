@@ -125,6 +125,85 @@ class TestIndexerIntegration:
         finally:
             s.minio_bucket = original_bucket
 
+    async def test_index_repeated_is_idempotent_no_pkey_collision(
+        self, pg_session
+    ):
+        """对同一 media_id 二次跑 Indexer.index，不应撞 chunk pkey。
+
+        语义：chunk.id = uuid5(media_id + chunk_index) 是确定性的，重跑就是覆盖
+        同一索引快照，而不是叠加。原实现直接 db.add() 会撞 PK failure_scenario：
+        第一次成功后第二次 db.flush() → IntegrityError(UniqueViolation chunk.pkey)。
+        修复：先 DELETE 该 media 的旧 chunk 行 + Qdrant 旧 points 再插入。
+
+        本测不依赖真 ASR/OCR 真出文本（静音小视频可能 0 chunk），直接构造
+        非空 transcription_chunk 行喂给 Indexer，确保 chunk_count > 0 才能验证
+        重跑的 pkey 真实碰撞路径。
+        """
+        user_id = await _create_test_user(pg_session)
+        content_hash = uuid.uuid4().hex[:32]
+        media = await _create_test_media(pg_session, user_id, content_hash)
+        media_id = media.id
+
+        # 手工构造 1 个 transcription + 2 个非空 transcription_chunk（不跑 ASR）
+        tr_orm = m.Transcription(
+            media_id=media_id,
+            full_text="第一段文本 第二段文本",
+            language="zh",
+            model_name="stub",
+            duration_sec=2.0,
+            chunk_count=2,
+        )
+        pg_session.add(tr_orm)
+        await pg_session.flush()
+
+        tc_0 = m.TranscriptionChunk(
+            media_id=media_id, chunk_index=0,
+            start_ms=0, end_ms=1000, text="第一段文本用于验证索引幂等",
+            status="completed",
+        )
+        tc_1 = m.TranscriptionChunk(
+            media_id=media_id, chunk_index=1,
+            start_ms=1000, end_ms=2000, text="第二段文本同样要进入 Qdrant 与 chunk 表",
+            status="completed",
+        )
+        chunk_orms = [tc_0, tc_1]
+        for c in chunk_orms:
+            pg_session.add(c)
+        await pg_session.commit()
+
+        indexer = get_indexer()
+        # 第一次：应成功写出 chunk 行
+        first = await indexer.index(
+            db=pg_session, media_id=media_id,
+            transcription=tr_orm, chunks=chunk_orms, ocr_results=[],
+        )
+        await pg_session.commit()
+        assert first.chunk_count > 0, "本测需 chunk_count>0 才能验证重跑 pkey 碰撞路径"
+
+        # 第二次：pkey uuid5(media_id:chunk_index) 与前一次完全相同
+        try:
+            second = await indexer.index(
+                db=pg_session, media_id=media_id,
+                transcription=tr_orm, chunks=chunk_orms, ocr_results=[],
+            )
+            await pg_session.commit()
+            assert second.chunk_count == first.chunk_count
+        except Exception as e:
+            if "chunk_pkey" in str(e) or "UniqueViolation" in str(e) or "duplicate key" in str(e).lower():
+                pytest.fail(
+                    f"Index 重跑不应撞 chunk pkey，但实际抛: {type(e).__name__}: {e}"
+                )
+            raise
+
+        from sqlalchemy import select, func as sa_func
+        chunk_total = await pg_session.execute(
+            select(sa_func.count(m.Chunk.id)).where(m.Chunk.media_id == media_id)
+        )
+        assert chunk_total.scalar_one() == first.chunk_count, (
+            "重复 index 后该 media 下 chunk 行数应仍等于单次 index 产出量（覆盖语义），"
+            " 不应翻倍"
+        )
+
     async def test_index_empty_transcription_sets_ready_status(
         self, test_video_path, minio_client, temp_bucket, pg_session
     ):

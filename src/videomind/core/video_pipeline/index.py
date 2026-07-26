@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.video_pipeline.embed import chunk_text, get_embedding_backend
@@ -72,6 +72,31 @@ class Indexer:
         Returns:
             IndexResult
         """
+        # 0. 幂等清理：先删掉该 media_id 下旧 chunk 行 + Qdrant 旧 points。
+        # chunk.id 是 uuid5(media_id + chunk_index) 确定性映射，重跑 = 同一索引快照重生成，
+        # 必须清旧再插入，否则 IntegrityError(UniqueViolation chunk.pkey)。
+        await db.execute(delete(m.Chunk).where(m.Chunk.media_id == media_id))
+        await db.flush()
+        # 同步清掉 Qdrant 旧 points（按 payload.media_id 过滤），保持双写一致
+        try:
+            from qdrant_client.http import models as qm
+            await self._qdrant._client.delete(
+                collection_name=self._qdrant._collection,
+                points_selector=qm.FilterSelector(
+                    filter=qm.Filter(
+                        must=[
+                            qm.FieldCondition(
+                                key="media_id",
+                                match=qm.MatchValue(value=str(media_id)),
+                            )
+                        ]
+                    )
+                ),
+            )
+        except Exception:
+            # Qdrant 通常允许不存在的 point 清理失败；忽略首次跑时的"collection 不存在"
+            pass
+
         # 1. 准备待分块文本段（ASR chunk text + OCR text）
         text_segments: list[tuple[str, str, int, int, str]] = []
         # (content, source_type, start_ms, end_ms, segment_id)
