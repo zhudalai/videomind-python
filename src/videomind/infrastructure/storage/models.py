@@ -168,6 +168,31 @@ class UserAIConfig(Base):
     )
 
 
+class UserConfig(Base):
+    """用户偏好配置（主题 / 默认模型 / 语言）。auth 前 dev bootstrap 用户一行。
+
+    与 UserAIConfig（LLM provider 凭证）正交：此表只管 UI 偏好。
+    """
+
+    __tablename__ = "user_config"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    theme: Mapped[str] = mapped_column(String(16), default="system")  # light | dark | system
+    default_model: Mapped[str | None] = mapped_column(String(128))
+    language: Mapped[str] = mapped_column(String(16), default="zh-CN")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Membership(Base):
     __tablename__ = "membership"
 
@@ -798,6 +823,7 @@ __all__ = [
     # 2.1 用户认证域
     "User",
     "UserAIConfig",
+    "UserConfig",
     "Membership",
     # 2.2 媒体知识域
     "MediaFile",

@@ -62,7 +62,13 @@ app.mount("/metrics", metrics_app)
 from videomind.interface.routes.health import router as health_router  # noqa: E402
 from videomind.interface.routes.video import router as video_router  # noqa: E402
 from videomind.interface.routes.sse import router as sse_router  # noqa: E402
+from videomind.interface.routes.agent import router as agent_router  # noqa: E402
+from videomind.interface.routes.rag import router as rag_router  # noqa: E402
+from videomind.interface.routes.user import router as user_router  # noqa: E402
 
 app.include_router(health_router, prefix="/api")
 app.include_router(video_router, prefix="/api")
 app.include_router(sse_router, prefix="/api")
+app.include_router(agent_router, prefix="/api")
+app.include_router(rag_router, prefix="/api")
+app.include_router(user_router, prefix="/api")
