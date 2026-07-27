@@ -363,13 +363,22 @@ class SegmentsListResponse(BaseModel):
 
 
 class OCRResultResponse(BaseModel):
+    """对齐 infrastructure/storage/models.py FrameOCR 真实列集合。
+
+    旧 schema 虚构了 frame_index / timestamp_ms / confidence / bbox，这些列在
+    FrameORM 上并不存在，且 ocr_text 写成必填 str —— 但 OCR 对「无文字帧」是合法
+    产出。结果导信 ready + 有 frame_ocr 行时 model_validate 抛 ValidationError，
+    把整个 GET /videos/{id} 详情带成 500，连累转录 tab 不渲染。
+    """
+
     id: uuid.UUID
     media_id: uuid.UUID
-    frame_index: int
-    timestamp_ms: int
-    ocr_text: str
-    confidence: float
-    bbox: dict | None
+    frame_ms: int               # 关键帧时间戳（毫秒）
+    minio_object: str           # 关键帧 MinIO 对象 key
+    ocr_text: str | None        # None = 该帧未识别到文字（合法）
+    phash: str | None           # 感知哈希（去重用）
+    model_name: str | None      # paddle-ocr 等
+    status: str                 # pending / completed / failed
     created_at: datetime
 
     model_config = {"from_attributes": True}

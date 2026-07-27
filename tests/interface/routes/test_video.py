@@ -1,6 +1,8 @@
 """L1 unit tests for interface/routes/video.py - Pydantic schema validation."""
 
 import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -9,6 +11,7 @@ from videomind.interface.routes.video import (
     PipelineSubmitRequest,
     PipelineSubmitResponse,
     PipelineStatusResponse,
+    OCRResultResponse,
 )
 
 
@@ -120,6 +123,60 @@ class TestPipelineStatusResponse:
             error_message="Download failed: 404",
         )
         assert resp.error_message == "Download failed: 404"
+
+
+class TestOCRResultResponse:
+    """OCRResultResponse must match the real FrameOCR ORM shape (not a fictional schema)."""
+
+    @staticmethod
+    def _fake_frame_ocr() -> SimpleNamespace:
+        """Mirror infrastructure/storage/models.py FrameOCR columns exactly:
+        id, media_id, frame_ms, minio_object, ocr_text (nullable), phash (nullable),
+        model_name (nullable), status, created_at. ocr_text=None is a legal
+        'frame had no detectable text' state, observed in production OCR rows.
+        """
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            media_id=uuid.uuid4(),
+            frame_ms=1000,
+            minio_object="media/abc/keyframes/000001.jpg",
+            ocr_text=None,
+            phash="ccf30555ad57b3e7",
+            model_name="paddle-ocr",
+            status="completed",
+            created_at=datetime(2026, 7, 27, 12, 7, 33, tzinfo=timezone.utc),
+        )
+
+    def test_validates_real_frame_ocr_row_without_ocr_text(self):
+        """OCRResultResponse.model_validate accepts a real FrameOCR row whose
+        ocr_text is None (no detectable text) — the case that 500s the detail route today."""
+        row = self._fake_frame_ocr()
+        resp = OCRResultResponse.model_validate(row)
+        # Aligned fields surfaced from the real ORM column set
+        assert resp.frame_ms == 1000
+        assert resp.ocr_text is None
+        assert resp.phash == "ccf30555ad57b3e7"
+        assert resp.model_name == "paddle-ocr"
+        assert resp.status == "completed"
+
+    def test_validates_real_frame_ocr_row_with_text(self):
+        """OCRResultResponse.model_validate accepts a real FrameOCR row with text."""
+        row = self._fake_frame_ocr()
+        row.ocr_text = "Detected caption"
+        resp = OCRResultResponse.model_validate(row)
+        assert resp.ocr_text == "Detected caption"
+        assert resp.frame_ms == 1000
+
+    def test_no_fictional_ocr_fields_remain(self):
+        """The fictional frame_index / timestamp_ms / confidence / bbox that don't exist
+        on FrameOCR must NOT remain on the schema — they caused the detail 500."""
+        field_names = set(OCRResultResponse.model_fields.keys())
+        assert "frame_index" not in field_names
+        assert "timestamp_ms" not in field_names
+        assert "confidence" not in field_names
+        assert "bbox" not in field_names
+        # Real ORM columns that must be present
+        assert {"frame_ms", "ocr_text"}.issubset(field_names)
 
 
 if __name__ == "__main__":
