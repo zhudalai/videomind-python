@@ -22,17 +22,31 @@
 
 ## 📑 目录 / Table of Contents
 
-- [✨ 核心亮点 / Highlights](#-核心亮点--highlights)
-- [🖼️ 项目截图 / Screenshots](#️-项目截图--screenshots)
-- [🏗️ 架构概览 / Architecture Overview](#️-架构概览--architecture-overview)
-- [🧰 技术栈 / Tech Stack](#-技术栈--tech-stack)
-- [🚀 快速开始 / Quick Start](#-快速开始--quick-start)
-- [⚙️ 配置说明 / Configuration](#️-配置说明--configuration)
-- [🧪 测试 / Testing](#-测试--testing)
-- [🌐 前端页面 / Frontend Pages](#-前端页面--frontend-pages)
-- [📁 目录结构 / Directory Structure](#-目录结构--directory-structure)
-- [📚 文档索引 / Documentation Index](#-文档索引--documentation-index)
-- [📄 许可证 / License](#-许可证--license)
+- [VideoMind](#videomind)
+  - [📑 目录 / Table of Contents](#-目录--table-of-contents)
+  - [✨ 核心亮点 / Highlights](#-核心亮点--highlights)
+    - [🇨🇳 中文](#-中文)
+    - [🇬🇧 English](#-english)
+  - [🖼️ 项目截图 / Screenshots](#️-项目截图--screenshots)
+    - [🇨🇳 中文](#-中文-1)
+    - [🇬🇧 English](#-english-1)
+  - [🏗️ 架构概览 / Architecture Overview](#️-架构概览--architecture-overview)
+    - [🇨🇳 中文](#-中文-2)
+    - [🇬🇧 English](#-english-2)
+  - [🧰 技术栈 / Tech Stack](#-技术栈--tech-stack)
+  - [🚀 快速开始 / Quick Start](#-快速开始--quick-start)
+    - [🇨🇳 中文](#-中文-3)
+    - [🇬🇧 English](#-english-3)
+  - [⚙️ 配置说明 / Configuration](#️-配置说明--configuration)
+    - [🇨🇳 中文](#-中文-4)
+    - [🇬🇧 English](#-english-4)
+  - [🧪 测试 / Testing](#-测试--testing)
+    - [🇨🇳 中文](#-中文-5)
+    - [🇬🇧 English](#-english-5)
+  - [🌐 前端页面 / Frontend Pages](#-前端页面--frontend-pages)
+  - [📁 目录结构 / Directory Structure](#-目录结构--directory-structure)
+  - [📚 文档索引 / Documentation Index](#-文档索引--documentation-index)
+  - [📄 许可证 / License](#-许可证--license)
 
 ---
 
@@ -400,6 +414,4 @@ videomind-python/
 ## 📄 许可证 / License
 
 [MIT License](LICENSE) © VideoMind
-
-
 
