@@ -8,8 +8,7 @@
 >
 > Upload a video or link → dual-path ASR + OCR → hybrid retrieval → an in-house AgentLoop multi-round analysis → structured conclusions backed by timestamped evidence
 
-_AI 应用工程师求职作品集实现 · Python 版_
-_AI application engineer portfolio implementation · Python edition_
+
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -402,12 +401,5 @@ videomind-python/
 
 [MIT License](LICENSE) © VideoMind
 
-> 🇨🇳 本项目为 AI 应用工程师求职作品集实现，全链路免费可跑。
->
-> 🇬🇧 This project is an AI application engineer portfolio implementation; the entire pipeline runs at zero cost.
 
-<div align="center">
 
-**⭐ 如果这个项目对你有启发，欢迎 Star / Star if this project inspires you ⭐**
-
-</div>
