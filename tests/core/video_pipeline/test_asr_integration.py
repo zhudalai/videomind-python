@@ -62,15 +62,18 @@ class TestASRIntegration:
             transcoder = get_transcoder()
             tc_result = await transcoder.execute(Path(test_video_path), content_hash)
 
-            # 3. ASR 识别（本地 tiny 模型，CPU）
+            # 3. ASR 识别：本集成测验 local 路径端到端（独立于 .env 的 ASR_PROVIDER，
+            #    避免 .env 切 api 时本测误走 api 路径）。模型档位由 .env 的 ASR_MODEL 决定。
             asr = get_asr()
+            asr._provider = "local"  # 强制 local，测 faster-whisper 真跑
             result = await asr.transcribe(tc_result.audio_local, media_id)
 
-            # 4. 断言 ASRResult 结构
+            # 4. 断言 ASRResult 结构（model_name 跟随 config.asr_model，不硬编码档位）
+            from videomind.config import get_settings
             assert isinstance(result, ASRResult)
             assert isinstance(result.full_text, str)
             assert isinstance(result.language, str)
-            assert result.model_name == "tiny"  # .env 里 ASR_MODEL=tiny
+            assert result.model_name == get_settings().asr_model
             assert result.duration_sec >= 0
             assert isinstance(result.chunks, list)
 
@@ -102,6 +105,7 @@ class TestASRIntegration:
             tc_result = await transcoder.execute(Path(test_video_path), content_hash)
 
             asr = get_asr()
+            asr._provider = "local"  # 强制 local，测 faster-whisper 真跑
             media_id = uuid.uuid4()
 
             r1 = await asr.transcribe(tc_result.audio_local, media_id)

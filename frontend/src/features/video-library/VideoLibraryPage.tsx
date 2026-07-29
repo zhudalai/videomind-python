@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { videoApi } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -44,7 +44,9 @@ export function VideoLibraryPage() {
   const { data: videos, isLoading, refetch } = useQuery({
     queryKey: ['videos', { page, page_size: pageSize, search: search || undefined, status: status !== 'all' ? status : undefined }],
     queryFn: () => videoApi.list({ page, page_size: pageSize, search: search || undefined, status: status !== 'all' ? status : undefined }),
-    placeholderData: (prev) => prev,
+    placeholderData: keepPreviousData,
+    staleTime: 0,
+    refetchOnMount: true,
   })
 
   const handleSearch = (e: React.FormEvent) => {

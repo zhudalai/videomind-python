@@ -19,12 +19,16 @@ export default defineConfig({
     },
   },
   server: {
-    port: 4000,
+    port: 3000,
+    strictPort: true,
+    host: '127.0.0.1',
     proxy: {
-      // Dev 下把相对路径 /api/* 转发到后端 FastAPI，让 EventSource('/api/videos/pipeline/{id}/progress')
-      // 这种相对路径的 SSE 也能直连后端。target 与 .env 的 VITE_API_BASE 同源，避免 CORS。
       '/api': {
-        target: 'http://localhost:8002',
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/sse': {
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

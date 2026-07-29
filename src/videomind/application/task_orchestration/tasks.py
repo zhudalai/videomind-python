@@ -371,8 +371,8 @@ def asr_task(self, context: dict) -> dict:
 
         # 下载音频到本地临时
         minio = get_minio_client()
-        audio_local = f"/tmp/{ctx.media_id}_audio.ogg"
-        await minio.download_file(tc["audio_minio"], audio_local)
+        audio_local = Path(f"/tmp/{ctx.media_id}_audio.ogg")
+        await minio.download_file(tc["audio_minio"], str(audio_local))
 
         # GPU 独占跑 ASR
         gpu = get_gpu_manager()
@@ -381,6 +381,29 @@ def asr_task(self, context: dict) -> dict:
                 with traced_span("pipeline.asr", attributes={"media_id": ctx.media_id, "task_id": self.request.id}):
                     asr_engine = get_asr()
                     asr_result = await asr_engine.transcribe(audio_local, uuid.UUID(ctx.media_id))
+
+        # 可选：LLM 加标点（方案 2）—— Whisper 系列在中文不产标点
+        # 接在 transcribe 后、入库前；独立于 GPU 锁，GPU 释放后再跑（不占 GPU）
+        # 失败/改字自动回退裸原文（punctuate.py 守护），不阻塞主流程
+        from videomind.config import get_settings
+        _s = get_settings()
+        if _s.asr_punctuate and asr_result.full_text:
+            from videomind.core.video_pipeline.punctuate import punctuate_result
+            from videomind.core.model_gateway.http_client import OpenAICompatibleClient
+            _pc = OpenAICompatibleClient(
+                base_url=_s.asr_punctuate_base_url,
+                api_key=_s.asr_punctuate_api_key,
+                default_model=_s.asr_punctuate_model,
+                timeout=180.0,
+            )
+            try:
+                asr_result = await punctuate_result(
+                    asr_result, _pc, _s.asr_punctuate_model,
+                    max_tokens=_s.asr_punctuate_max_tokens,
+                    temperature=_s.asr_punctuate_temperature,
+                )
+            finally:
+                await _pc.close()
 
         # 入库
         async with db_session() as db:

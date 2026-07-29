@@ -6,16 +6,26 @@ __pycache__/
 .venv/
 .hypothesis/
 
+# ───────── 日志 ─────────
+*.log
+
 # ───────── 下载 / 构建产物 ─────────
 _downloads/
 build/
 dist/
 *.tsbuildinfo
 
+# ───────── 临时调试脚本（仓库根目录的临时验证工具）─────────
+/verify_openrouter_free.py
+
 # ───────── Node / 前端构建产物 ─────────
 node_modules/
 .vite/
 test-results/
+frontend/dist/
+frontend/coverage/
+frontend/test-upload.cjs
+frontend/test-upload.spec.ts
 
 # ───────── 密钥 / 本地配置（含后端 .env 与前端 .env）─────────
 .env
@@ -25,3 +35,7 @@ test-results/
 
 # ───────── 大体积视频素材（仅限仓库根目录；tests/fixtures/ 小测试视频不受影响）─────────
 /*.mp4
+
+# ───────── 截图（仓库根目录下的 Windows 截图，文件名含中文+空格）─────────
+屏幕截图 *.png
+/screenshots/
