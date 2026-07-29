@@ -40,7 +40,7 @@
 
 ### 🇨🇳 中文
 
-- **🛤️ 推理双路径（架构亮点）**：ASR / OCR / Embedding 三类推理各有一个 `*_PROVIDER` 环境变量（取值 `local` | `api`），同一份接口、env 切后端实现。主力走 API（Groq `whisper-large-v3-turbo`），本地 `small/cpu` 作无网兜底——求职面试可讲清「为什么不用单路径，双路径的代价与收益」。
+- **🛤️ 推理双路径（架构亮点）**：ASR / OCR / Embedding 三类推理各有一个 `*_PROVIDER` 环境变量（取值 `local` | `api`），同一份接口、env 切后端实现。主力走 API（Groq `whisper-large-v3-turbo`），本地 `small/cpu` 作无网兜底。
 - **🧠 自研 AgentLoop**：`Planner → Executor → Critic` 两轮闭环，证据强校验，Checkpoint 断点恢复——核心循环自研、边界清晰，而非全盘套 LangChain。
 - **🔍 混合检索 + 引用溯源**：向量（Qdrant BGE-M3）+ 关键词（BM25）→ RRF 融合 → CrossEncoder 重排；每个结论绑定 `timestampMs + source(ASR|OCR) + 原文片段`。
 - **🎟️ 零外部强依赖运行**：全链路可本地跑，断网可用、成本可控；单卡 8GB 显存串行错峰跑完 Whisper → OCR/Embedding → LLM。
@@ -50,7 +50,7 @@
 
 ### 🇬🇧 English
 
-- **🛤️ Dual-path inference (architecture highlight)**: ASR / OCR / Embedding each carry a `*_PROVIDER` env (`local` | `api`) — one interface, env-driven backend swap. Production uses the API path (Groq `whisper-large-v3-turbo`) with a local `small/cpu` fallback. Interview-ready: "why not single-path, and the trade-offs of dual-path."
+- **🛤️ Dual-path inference (architecture highlight)**: ASR / OCR / Embedding each carry a `*_PROVIDER` env (`local` | `api`) — one interface, env-driven backend swap. Production uses the API path (Groq `whisper-large-v3-turbo`) with a local `small/cpu` fallback. 
 - **🧠 In-house AgentLoop**: a `Planner → Executor → Critic` two-round loop with hard evidence verification and checkpoint resumption — the core loop is hand-built with clear boundaries, not a wholesale LangChain wrapper.
 - **🔍 Hybrid retrieval + citation provenance**: vectors (Qdrant BGE-M3) + keywords (BM25) → RRF fusion → CrossEncoder reranking; every conclusion is anchored to `timestampMs + source(ASR|OCR) + raw fragment`.
 - **🎟️ Zero hard external dependency**: the full pipeline runs locally, works offline, and stays cost-controlled; a single 8 GB GPU walks Whisper → OCR/Embedding → LLM in serialized, peak-shifted stages.
