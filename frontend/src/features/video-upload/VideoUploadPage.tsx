@@ -42,7 +42,6 @@ export function VideoUploadPage() {
   const [activeTab, setActiveTab] = useState<'url' | 'file'>('url')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [dragActive, setDragActive] = useState(false)
 
   // URL form
@@ -56,6 +55,9 @@ export function VideoUploadPage() {
     resolver: zodResolver(fileSchema),
     defaultValues: { file: undefined as any },
   })
+
+  // 文件预览直接从表单状态读，避免另设一份 selectedFile 不同步
+  const watchedFile = fileForm.watch('file') as File | undefined
 
   const handleUrlSubmit = async (data: UrlFormData) => {
     setIsSubmitting(true)
@@ -112,15 +114,17 @@ export function VideoUploadPage() {
     setDragActive(false)
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      fileForm.setValue('file', e.dataTransfer.files[0])
-      setSelectedFile(e.dataTransfer.files[0])
+      fileForm.setValue('file', e.dataTransfer.files[0], { shouldValidate: true })
     }
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      fileForm.setValue('file', e.target.files[0])
-      setSelectedFile(e.target.files[0])
+  // 触发隐藏 file input（被 div onClick 调用）
+  const triggerFileInput = () => {
+    if (!isSubmitting) {
+      const input = document.getElementById('video-file') as HTMLInputElement
+      if (input && !input.disabled) {
+        input.click()
+      }
     }
   }
 
@@ -242,23 +246,39 @@ export function VideoUploadPage() {
               <CardContent className="space-y-4">
                 <div
                   className={cn(
-                    'border-2 border-dashed rounded-lg p-8 text-center transition-colors',
+                    'border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer',
                     dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25',
-                    selectedFile ? 'border-green-500 bg-green-500/5' : ''
+                    watchedFile ? 'border-green-500 bg-green-500/5' : ''
                   )}
                   onDragEnter={handleDrag}
                   onDragLeave={handleDrag}
                   onDragOver={handleDrag}
                   onDrop={handleDrop}
+                  onClick={triggerFileInput}
                 >
                   <input
                     type="file"
                     id="video-file"
-                    accept="video/*"
-                    onChange={handleFileChange}
-                    className="hidden"
+                    accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,video/x-flv"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      // 不走 register('file')：RHF 会在 ref 挂载时把 input.files 这个空 FileList 自动塞进 form state
+                      // 导致 watchedFile 在 mount 时就是 truthy 但 .name/.size 为 undefined，看上去像选了文件其实没选
+                      // 这里手动 setValue 单个 File（或 undefined）：zod z.instanceof(File) 才能正确校验
+                      fileForm.setValue('file', file as any, { shouldValidate: true })
+                    }}
+                    style={{
+                      position: 'absolute',
+                      width: '1px',
+                      height: '1px',
+                      padding: 0,
+                      margin: '-1px',
+                      overflow: 'hidden',
+                      clip: 'rect(0, 0, 0, 0)',
+                      whiteSpace: 'nowrap',
+                      border: 0,
+                    }}
                     disabled={isSubmitting}
-                    ref={(el) => el && fileForm.register('file').ref(el)}
                   />
                   <label
                     htmlFor="video-file"
@@ -269,12 +289,12 @@ export function VideoUploadPage() {
                   >
                     <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                     <p className="text-lg font-medium">
-                      {selectedFile ? '已选择文件' : '点击或拖拽上传视频文件'}
+                      {watchedFile ? '已选择文件' : '点击或拖拽上传视频文件'}
                     </p>
-                    {selectedFile && (
+                    {watchedFile && (
                       <div className="mt-2 text-sm text-muted-foreground">
-                        <p>{selectedFile.name}</p>
-                        <p>{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</p>
+                        <p>{watchedFile.name}</p>
+                        <p>{(watchedFile.size / 1024 / 1024).toFixed(1)} MB</p>
                       </div>
                     )}
                   </label>
@@ -291,7 +311,7 @@ export function VideoUploadPage() {
                   className="w-full"
                   size="lg"
                   loading={isSubmitting}
-                  disabled={!selectedFile || isSubmitting}
+                  disabled={!watchedFile || isSubmitting}
                 >
                   <Loader2 className="h-4 w-4 mr-2" />
                   上传并处理

@@ -107,3 +107,19 @@ export const STAGE_ORDER: IngestionStage[] = [
   'indexing',
   'completed',
 ]
+
+/**
+ * 从 axios 抛出的 Error 里抽出给用户看的 detail。
+ * api.ts 拦截器已经把 error.response?.data?.detail 挂在 err.detail，
+ * 否则降级到 err.message，再否则笼统文案。
+ */
+export function extractErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const e = error as { detail?: unknown; message?: unknown }
+    if (typeof e.detail === 'string' && e.detail) return e.detail
+    if (typeof e.detail === 'object' && e.detail !== null) return JSON.stringify(e.detail)
+    if (typeof e.message === 'string' && e.message) return e.message
+  }
+  if (typeof error === 'string') return error
+  return '操作失败，请重试'
+}

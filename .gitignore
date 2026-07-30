@@ -39,3 +39,13 @@ frontend/test-upload.spec.ts
 # ───────── 截图（仓库根目录下的 Windows 截图，文件名含中文+空格）─────────
 屏幕截图 *.png
 /screenshots/
+
+# ───────── 一次性调试产物（根目录；ASR 排查输出 / 一次性 test 脚本 / 计划草稿 / 截图）─────────
+# 前导 / 锁定仓库根目录，不会误伤 frontend/、tests/fixtures/ 下的同名文件
+/api_*.json
+/api_*.txt
+/asr_output.txt
+/test_*.py
+/ASR_PUNCTUATION_TEST_PLAN.md
+/upload-page.png
+/videos-*.png
