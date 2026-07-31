@@ -93,6 +93,20 @@ The screenshots below show the VideoMind workbench and pipeline progress at runt
     <td align="center"><img src="屏幕截图%202026-07-29%20073534.png" alt="VideoMind Screenshot 1" width="480"></td>
     <td align="center"><img src="屏幕截图%202026-07-29%20073624.png" alt="VideoMind Screenshot 2" width="480"></td>
   </tr>
+  <tr>
+    <td align="center"><b>截图 3 / Screenshot 3 — Dashboard 中文 i18n / Dashboard zh-CN</b></td>
+    <td align="center"><b>截图 4 / Screenshot 4 — 跨页持久 + 占位符插值 / Cross-page + interpolation</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="04-dashboard-chinese.png" alt="VideoMind Screenshot 3 — Dashboard in Chinese" width="480"></td>
+    <td align="center"><img src="05-dashboard-chinese-final.png" alt="VideoMind Screenshot 4 — Chinese across pages with interpolation" width="480"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><b>截图 5 / Screenshot 5 — 双向切换英文 + 持久化 / Bidirectional EN round-trip persistence</b></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="屏幕截图%202026-07-31%20091205.png" alt="VideoMind Screenshot 5 — English round-trip" width="720"></td>
+  </tr>
 </table>
 
 > ℹ️ 截图文件名含中文与空格，在 Markdown 中以 URL 编码（`%20`）引用。 / Screenshot filenames contain Chinese characters and spaces; they are referenced URL-encoded (`%20`) in Markdown.
