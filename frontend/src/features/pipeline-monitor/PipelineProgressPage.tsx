@@ -19,6 +19,7 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import type { PipelineStatusResponse, IngestionStage, ProgressEvent } from '@/types/api'
+import { useTranslation } from 'react-i18next'
 
 interface StageStatus {
   stage: IngestionStage
@@ -59,6 +60,7 @@ const createEmptyStageRecord = <T,>(): Record<IngestionStage, T> => ({
 })
 
 export function PipelineProgressPage() {
+  const { t } = useTranslation()
   const { id: mediaId } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
@@ -144,9 +146,6 @@ export function PipelineProgressPage() {
     setConnectionState('connecting')
 
     try {
-      // 用后端绝对地址（VITE_API_BASE）建 EventSource，绕过 vite dev server 对
-      // text/event-stream 长连接的 buffering（否则浏览器 EventSource 卡 CONNECTING 永不 OPEN）。
-      // 与 axios baseURL 同源，后端已开 CORS，跨域 GET 可正常握 OPEN。
       const apiBase = import.meta.env.VITE_API_BASE || '/api'
       const es = new EventSource(`${apiBase}/videos/pipeline/${mediaId}/progress`)
       eventSourceRef.current = es
@@ -157,9 +156,6 @@ export function PipelineProgressPage() {
         setRetryCount(0)
       }
 
-      // 后端 sse.py 发的是 named event（sse_starlette event_generator yield
-      // {"event": "progress", "data": ...}），浏览器 EventSource 命中 addEventListener('progress')，
-      // 命中默认的 `onmessage`。之前用 onmessage → 事件数永远 0。这里对齐后端 named event。
       es.addEventListener('progress', (event) => {
         if (!mountedRef.current) return
 
@@ -168,7 +164,6 @@ export function PipelineProgressPage() {
 
           setSseEvents(prev => [...prev, progressEvent])
 
-          // Check for completion
           if (progressEvent.stage === 'completed' || progressEvent.progress_pct >= 100) {
             setIsComplete(true)
             setConnectionState('closed')
@@ -188,7 +183,6 @@ export function PipelineProgressPage() {
         setConnectionState('error')
         es.close()
 
-        // Auto-retry up to 5 times
         if (retryCount < 5) {
           setTimeout(() => {
             if (mountedRef.current) {
@@ -211,24 +205,19 @@ export function PipelineProgressPage() {
       const status = await pipelineApi.getStatus(mediaId)
       setPipelineStatus(status)
     } catch (err: any) {
-      setError(err.detail || '获取状态失败')
+      setError(err.detail || t('utils.operationFailed'))
     }
-  }, [mediaId])
+  }, [mediaId, t])
 
   // Initial load
   useEffect(() => {
     if (!mediaId) return
 
-    // React 18 StrictMode 在 dev 双跑 effect：mount → cleanup → remount。
-    // cleanup 把 mountedRef.current 置 false，若重挂载时不在 effect 起手把它重置回 true，
-    // 二次 mount 里 connectSSE 建的 EventSource 的 onopen 会因 `if (!mountedRef.current) return`
-    // 直接被吞掉，UI 永远停在 'connecting'。所以这里务必先重置。
     mountedRef.current = true
 
     fetchStatus()
     connectSSE()
 
-    // Poll REST API as fallback
     const interval = setInterval(fetchStatus, 5000)
 
     return () => {
@@ -255,7 +244,7 @@ export function PipelineProgressPage() {
   if (!mediaId) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-muted-foreground">无效的视频 ID</p>
+        <p className="text-muted-foreground">{t('videoDetail.invalidId')}</p>
       </div>
     )
   }
@@ -269,23 +258,23 @@ export function PipelineProgressPage() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold">处理进度</h1>
-            <p className="text-muted-foreground">实时监控视频处理管线</p>
+            <h1 className="text-2xl font-bold">{t('pipeline.title')}</h1>
+            <p className="text-muted-foreground">{t('pipeline.processingStages')}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Badge variant={connectionState === 'open' ? 'success' : connectionState === 'error' ? 'destructive' : 'secondary'}>
-            {connectionState === 'open' && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> 连接中</span>}
-            {connectionState === 'connecting' && <span>连接中...</span>}
-            {connectionState === 'closed' && <span>已断开</span>}
-            {connectionState === 'error' && <span>连接失败</span>}
+            {connectionState === 'open' && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> {t('pipeline.liveEvents')}</span>}
+            {connectionState === 'connecting' && <span>{t('pipeline.processing')}</span>}
+            {connectionState === 'closed' && <span>{t('utils.disconnected')}</span>}
+            {connectionState === 'error' && <span>{t('utils.unknownError')}</span>}
           </Badge>
 
           {isComplete && pipelineStatus?.status === 'ready' && (
             <Button onClick={handleViewDetail}>
               <CheckCircle className="h-4 w-4 mr-2" />
-              查看详情
+              {t('pipeline.viewDetails')}
             </Button>
           )}
         </div>
@@ -298,7 +287,7 @@ export function PipelineProgressPage() {
           <span>{error}</span>
           <Button variant="ghost" size="sm" onClick={handleReconnect}>
             <RotateCcw className="h-4 w-4 mr-1" />
-            重试
+            {t('utils.retry')}
           </Button>
         </div>
       )}
@@ -306,9 +295,9 @@ export function PipelineProgressPage() {
       {/* Pipeline Stages */}
       <Card>
         <CardHeader>
-          <CardTitle>处理阶段</CardTitle>
+          <CardTitle>{t('pipeline.processingStages')}</CardTitle>
           <CardDescription>
-            视频处理包含 5 个主要阶段，每个阶段完成后自动进入下一阶段
+            {t('pipeline.stagesDesc')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -359,21 +348,21 @@ export function PipelineProgressPage() {
                         stage.status === 'active' && 'text-primary',
                         stage.status === 'failed' && 'text-destructive',
                       )}>
-                        {stage.label}
+                        {t(stage.label)}
                       </h4>
                       {stage.status === 'active' && (
                         <Badge variant="secondary" className="text-xs">
-                          进行中
+                          {t('pipeline.stageStatus.active')}
                         </Badge>
                       )}
                       {stage.status === 'completed' && (
                         <Badge variant="success" className="text-xs">
-                          完成
+                          {t('pipeline.stageStatus.completed')}
                         </Badge>
                       )}
                       {stage.status === 'failed' && (
                         <Badge variant="destructive" className="text-xs">
-                          失败
+                          {t('pipeline.stageStatus.failed')}
                         </Badge>
                       )}
                     </div>
@@ -383,7 +372,7 @@ export function PipelineProgressPage() {
                       <div className="flex items-center justify-between text-sm mb-1">
                         <span className="text-muted-foreground">{stage.message || ''}</span>
                         <span className="font-medium">
-                          {stage.progress >= 0 ? `${Math.round(stage.progress)}%` : '等待中'}
+                          {stage.progress >= 0 ? `${Math.round(stage.progress)}%` : t('pipeline.stageStatus.pending')}
                         </span>
                       </div>
                       <Progress value={Math.max(0, stage.progress)} className="h-2" />
@@ -399,37 +388,37 @@ export function PipelineProgressPage() {
       {/* Overall Progress */}
       <Card>
         <CardHeader>
-          <CardTitle>总体进度</CardTitle>
+          <CardTitle>{t('pipeline.overallProgress')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-lg font-bold">
                 {pipelineStatus?.status === 'ready' ? '100%' :
-                  pipelineStatus?.status === 'failed' ? '失败' :
+                  pipelineStatus?.status === 'failed' ? t('pipeline.stageStatus.failed') :
                   `${Math.round(pipelineStatus?.stage_progress?.indexing || 0)}%`}
               </span>
               <Badge variant={pipelineStatus?.status === 'ready' ? 'success' : pipelineStatus?.status === 'failed' ? 'destructive' : 'secondary'}>
-                {pipelineStatus?.status || '未知'}
+                {pipelineStatus?.status || t('utils.unknown')}
               </Badge>
             </div>
             <Progress value={pipelineStatus?.status === 'ready' ? 100 : pipelineStatus?.stage_progress?.indexing || 0} className="h-4" />
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
-                <p className="text-muted-foreground">当前阶段</p>
-                <p className="font-medium">{STAGE_LABELS[pipelineStatus?.status as IngestionStage] || pipelineStatus?.status}</p>
+                <p className="text-muted-foreground">{t('pipeline.currentStage')}</p>
+                <p className="font-medium">{t(STAGE_LABELS[pipelineStatus?.status as IngestionStage] || (pipelineStatus?.status ?? ''))}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">视频 ID</p>
+                <p className="text-muted-foreground">{t('pipeline.videoId')}</p>
                 <p className="font-medium font-mono text-xs">{mediaId?.slice(0, 8)}...</p>
               </div>
               <div>
-                <p className="text-muted-foreground">连接状态</p>
+                <p className="text-muted-foreground">{t('pipeline.connectionState')}</p>
                 <p className="font-medium capitalize">{connectionState}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">SSE 事件数</p>
+                <p className="text-muted-foreground">{t('pipeline.sseEvents')}</p>
                 <p className="font-medium">{sseEvents.length}</p>
               </div>
             </div>
@@ -441,7 +430,7 @@ export function PipelineProgressPage() {
       {sseEvents.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>实时事件日志</CardTitle>
+            <CardTitle>{t('pipeline.liveEvents')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="max-h-64 overflow-y-auto space-y-2">
@@ -457,13 +446,13 @@ export function PipelineProgressPage() {
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <Badge variant="outline" className="text-xs">
-                      {STAGE_LABELS[event.stage] || event.stage}
+                      {t(STAGE_LABELS[event.stage] || event.stage)}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
                       {new Date(event.timestamp).toLocaleTimeString()}
                     </span>
                     <span className="ml-auto font-medium">
-                      {event.progress_pct >= 0 ? `${event.progress_pct}%` : '错误'}
+                      {event.progress_pct >= 0 ? `${event.progress_pct}%` : t('pipeline.stageStatus.failed')}
                     </span>
                   </div>
                   <p className="text-muted-foreground">{event.message}</p>

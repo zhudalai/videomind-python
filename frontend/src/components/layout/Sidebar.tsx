@@ -1,6 +1,7 @@
 import { Link, NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
+import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard,
   Upload,
@@ -15,16 +16,17 @@ import {
 import { useState } from 'react'
 
 const navigation = [
-  { name: '概览', href: '/', icon: LayoutDashboard },
-  { name: '上传视频', href: '/upload', icon: Upload },
-  { name: '视频库', href: '/videos', icon: Video },
-  { name: '智能问答', href: '/chat', icon: MessageSquare },
-  { name: '深度分析', href: '/analysis', icon: Brain },
-  { name: '健康监控', href: '/health', icon: Activity },
-  { name: '设置', href: '/settings', icon: Settings },
+  { name: 'nav.dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'nav.upload', href: '/upload', icon: Upload },
+  { name: 'nav.videos', href: '/videos', icon: Video },
+  { name: 'nav.chat', href: '/chat', icon: MessageSquare },
+  { name: 'nav.analysis', href: '/analysis', icon: Brain },
+  { name: 'nav.health', href: '/health', icon: Activity },
+  { name: 'nav.settings', href: '/settings', icon: Settings },
 ]
 
 export function Sidebar() {
+  const { t } = useTranslation()
   const [collapsed, setCollapsed] = useState(false)
 
   return (
@@ -48,19 +50,19 @@ export function Sidebar() {
             size="icon"
             onClick={() => setCollapsed(!collapsed)}
             className="h-8 w-8"
-            aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+            aria-label={collapsed ? t('nav.collapseSidebar') : t('nav.expandSidebar')}
           >
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-1 p-3" aria-label="主导航">
+        <nav className="flex-1 space-y-1 p-3" aria-label={t('nav.mainNavigation')}>
           {navigation.map((item) => {
             const Icon = item.icon
             return (
               <NavLink
-                key={item.name}
+                key={item.href}
                 to={item.href}
                 className={({ isActive }) =>
                   cn(
@@ -71,10 +73,10 @@ export function Sidebar() {
                     collapsed && 'justify-center',
                   )
                 }
-                title={collapsed ? item.name : undefined}
+                title={collapsed ? t(item.name) : undefined}
               >
                 <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
-                {!collapsed && <span>{item.name}</span>}
+                {!collapsed && <span>{t(item.name)}</span>}
               </NavLink>
             )
           })}
@@ -84,7 +86,7 @@ export function Sidebar() {
         <div className={cn('border-t p-3', collapsed && 'hidden')}>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex h-2 w-2 rounded-full bg-green-500" />
-            <span>系统运行正常</span>
+            <span>{t('nav.systemNormal')}</span>
           </div>
         </div>
       </div>

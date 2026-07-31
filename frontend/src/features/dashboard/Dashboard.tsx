@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
 import { healthApi, videoApi } from '@/lib/api'
-import { cn, formatRelativeTime, getStatusColor } from '@/lib/utils'
+import { cn, getStatusColor } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import {
   Video,
@@ -20,13 +21,14 @@ import {
 } from 'lucide-react'
 
 const quickActions = [
-  { name: '上传视频', href: '/upload', icon: Upload, description: '从链接或本地文件导入' },
-  { name: '视频库', href: '/videos', icon: Video, description: '管理和浏览所有视频' },
-  { name: '智能问答', href: '/chat', icon: MessageSquare, description: '基于视频内容提问' },
-  { name: '深度分析', href: '/analysis', icon: Brain, description: '目标驱动的复杂分析' },
+  { name: 'dashboard.uploadVideoTitle', href: '/upload', icon: Upload, descriptionKey: 'dashboard.uploadVideoDesc' },
+  { name: 'dashboard.manageVideosTitle', href: '/videos', icon: Video, descriptionKey: 'dashboard.manageVideosDesc' },
+  { name: 'dashboard.smartQnATitle', href: '/chat', icon: MessageSquare, descriptionKey: 'dashboard.smartQnADesc' },
+  { name: 'dashboard.deepAnalysisTitle', href: '/analysis', icon: Brain, descriptionKey: 'dashboard.deepAnalysisDesc' },
 ]
 
 export function Dashboard() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
 
   const { data: health, isLoading: healthLoading } = useQuery({
@@ -48,7 +50,7 @@ export function Dashboard() {
   })
 
   const handleDelete = (mediaId: string) => {
-    if (!confirm('确定要删除这个视频吗？此操作不可恢复。')) return
+    if (!confirm(t('dashboard.deleteConfirm'))) return
     deleteMutation.mutate(mediaId)
   }
 
@@ -58,10 +60,10 @@ export function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">VideoMind</h1>
-          <p className="text-muted-foreground mt-1">视频理解与智能分析平台</p>
+          <p className="text-muted-foreground mt-1">{t('app.subtitle')}</p>
         </div>
         <Link to="/upload">
-          <Button size="lg"><Upload className="h-4 w-4 mr-2" /> 新建视频</Button>
+          <Button size="lg"><Upload className="h-4 w-4 mr-2" /> {t('dashboard.newVideo')}</Button>
         </Link>
       </div>
 
@@ -70,7 +72,7 @@ export function Dashboard() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <Activity className="h-5 w-5" />
-            系统健康状态
+            {t('dashboard.systemHealth')}
           </CardTitle>
           {healthLoading ? (
             <span className="animate-pulse h-4 w-20 bg-muted rounded" />
@@ -79,12 +81,12 @@ export function Dashboard() {
               {health?.status === 'UP' ? (
                 <>
                   <CheckCircle className="h-3 w-3" />
-                  全部正常
+                  {t('dashboard.allHealthy')}
                 </>
               ) : (
                 <>
                   <AlertCircle className="h-3 w-3" />
-                  部分异常
+                  {t('dashboard.someIssues')}
                 </>
               )}
             </Badge>
@@ -106,15 +108,15 @@ export function Dashboard() {
 
       {/* Quick Actions */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">快速操作</h2>
+        <h2 className="text-xl font-semibold mb-4">{t('dashboard.quickActions')}</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {quickActions.map(action => (
-            <Link key={action.name} to={action.href}>
+            <Link key={action.href} to={action.href}>
               <Card className="h-full hover:shadow-md transition-shadow cursor-pointer">
                 <CardContent className="p-6 flex flex-col items-center text-center">
                   <action.icon className="h-10 w-10 text-primary mb-3" />
-                  <h3 className="font-medium">{action.name}</h3>
-                  <p className="text-sm text-muted-foreground mt-1">{action.description}</p>
+                  <h3 className="font-medium">{t(action.name)}</h3>
+                  <p className="text-sm text-muted-foreground mt-1">{t(action.descriptionKey)}</p>
                 </CardContent>
               </Card>
             </Link>
@@ -124,9 +126,9 @@ export function Dashboard() {
 
       {/* Recent Videos */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">最近视频</h2>
+        <h2 className="text-xl font-semibold">{t('dashboard.recentVideos')}</h2>
         <Link to="/videos" className="text-sm text-primary hover:underline">
-          查看全部 →
+          {t('videoLibrary.viewAll')}
         </Link>
       </div>
 
@@ -146,10 +148,10 @@ export function Dashboard() {
         <Card>
           <CardContent className="py-12 text-center">
             <Video className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium mb-2">暂无视频</h3>
-            <p className="text-muted-foreground mb-4">上传第一个视频开始体验</p>
+            <h3 className="text-lg font-medium mb-2">{t('dashboard.noRecentVideos')}</h3>
+            <p className="text-muted-foreground mb-4">{t('dashboard.startExploring')}</p>
             <Link to="/upload">
-              <Button><Upload className="h-4 w-4 mr-2" /> 上传视频</Button>
+              <Button><Upload className="h-4 w-4 mr-2" /> {t('dashboard.uploadVideo')}</Button>
             </Link>
           </CardContent>
         </Card>
@@ -165,6 +167,23 @@ export function Dashboard() {
 }
 
 function VideoCard({ video, onDelete }: { video: { id: string; filename: string; status: string; duration_ms: number | null; created_at: string; file_size: number; error_message: string | null }; onDelete: (id: string) => void }) {
+  const { t } = useTranslation()
+
+  const formatTimeAgo = (date: string | Date) => {
+    const now = new Date()
+    const then = new Date(date)
+    const diffMs = now.getTime() - then.getTime()
+    const diffSecs = Math.floor(diffMs / 1000)
+    const diffMins = Math.floor(diffSecs / 60)
+    const diffHours = Math.floor(diffMins / 60)
+    const diffDays = Math.floor(diffHours / 24)
+    if (diffSecs < 60) return t('utils.justNow')
+    if (diffMins < 60) return t('utils.minutesAgo', { count: diffMins })
+    if (diffHours < 24) return t('utils.hoursAgo', { count: diffHours })
+    if (diffDays < 7) return t('utils.daysAgo', { count: diffDays })
+    return new Date(date).toLocaleString()
+  }
+
 
   return (
     <Card className="group">
@@ -192,7 +211,7 @@ function VideoCard({ video, onDelete }: { video: { id: string; filename: string;
                 {Math.floor(video.duration_ms / 60000)}:{String(Math.floor((video.duration_ms % 60000) / 1000)).padStart(2, '0')}
               </span>
             )}
-            <span>{formatRelativeTime(video.created_at)}</span>
+            <span>{formatTimeAgo(video.created_at)}</span>
           </div>
 
           {/* Progress for processing videos */}
@@ -216,7 +235,7 @@ function VideoCard({ video, onDelete }: { video: { id: string; filename: string;
             {video.status === 'ready' && (
               <Link to={`/videos/${video.id}/progress`}>
                 <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
-                  进度
+                  {t('videoLibrary.progress')}
                 </Button>
               </Link>
             )}

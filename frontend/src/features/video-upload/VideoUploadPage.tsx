@@ -12,19 +12,21 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs'
 import { Badge } from '@/components/ui/Badge'
 import { Upload, Link2, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
 
-// Validation schemas
+// Validation schemas — messages are in English as fallback since zod schemas
+// are module-level constants initialized before i18n is available.
 const urlSchema = z.object({
-  url: z.string().url('请输入有效的 URL').min(5, 'URL 太短'),
+  url: z.string().url('Invalid URL').min(5, 'URL too short'),
 })
 
 const fileSchema = z.object({
-  file: z.instanceof(File, { message: '请选择视频文件' }).refine(
+  file: z.instanceof(File, { message: 'Please select a video file' }).refine(
     (f) => f.size <= 2 * 1024 * 1024 * 1024,
-    '文件大小不能超过 2GB'
+    'File size must not exceed 2GB'
   ).refine(
     (f) => f.type.startsWith('video/'),
-    '请选择视频文件'
+    'Please select a video file'
   ),
 })
 
@@ -34,10 +36,11 @@ type FileFormData = z.infer<typeof fileSchema>
 const SUPPORTED_SITES = [
   { name: 'YouTube', pattern: /youtube\.com|youtu\.be/, icon: '🎬' },
   { name: 'Bilibili', pattern: /bilibili\.com|b23\.tv/, icon: '📺' },
-  { name: '直接视频链接', pattern: /\.(mp4|mov|avi|mkv|webm|flv)(\?.*)?$/i, icon: '🔗' },
+  { name: 'Generic Video Link', pattern: /\.(mp4|mov|avi|mkv|webm|flv)(\?.*)?$/i, icon: '🔗' },
 ]
 
 export function VideoUploadPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<'url' | 'file'>('url')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -56,7 +59,7 @@ export function VideoUploadPage() {
     defaultValues: { file: undefined as any },
   })
 
-  // 文件预览直接从表单状态读，避免另设一份 selectedFile 不同步
+  // File preview read directly from form state to avoid a separate selectedFile state that can drift out of sync
   const watchedFile = fileForm.watch('file') as File | undefined
 
   const handleUrlSubmit = async (data: UrlFormData) => {
@@ -72,7 +75,7 @@ export function VideoUploadPage() {
         navigate(`/videos/${response.media_id}/progress`)
       }
     } catch (err: any) {
-      setError(err.detail || '提交失败，请重试')
+      setError(err.detail || t('utils.operationFailed'))
     } finally {
       setIsSubmitting(false)
     }
@@ -80,19 +83,19 @@ export function VideoUploadPage() {
 
   const handleFileSubmit = async (data: FileFormData) => {
     if (!data.file) {
-      setError('请选择视频文件')
+      setError(t('videoUpload.pleaseSelectFile'))
       return
     }
     setIsSubmitting(true)
     setError(null)
     try {
-      // 走 multipart/form-data → MinIO → pipeline_task(skip_download=true)
+      // multipart/form-data → MinIO → pipeline_task(skip_download=true)
       const response = await pipelineApi.uploadFile(data.file)
       if (response.media_id) {
         navigate(`/videos/${response.media_id}/progress`)
       }
     } catch (err: any) {
-      setError(err.detail || '上传失败，请重试')
+      setError(err.detail || t('utils.operationFailed'))
     } finally {
       setIsSubmitting(false)
     }
@@ -118,13 +121,12 @@ export function VideoUploadPage() {
     }
   }
 
-  // 触发隐藏 file input（被 div onClick 调用）
+  // Trigger hidden file input (called by div onClick)
   const triggerFileInput = () => {
-    if (!isSubmitting) {
-      const input = document.getElementById('video-file') as HTMLInputElement
-      if (input && !input.disabled) {
-        input.click()
-      }
+    if (isSubmitting) return
+    const input = document.getElementById('video-file') as HTMLInputElement
+    if (input && !input.disabled) {
+      input.click()
     }
   }
 
@@ -136,9 +138,9 @@ export function VideoUploadPage() {
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">上传视频</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t('videoUpload.title')}</h1>
         <p className="text-muted-foreground mt-1">
-          支持 YouTube、Bilibili 链接或直接上传本地视频文件
+          {t('videoUpload.subtitle')}
         </p>
       </div>
 
@@ -155,11 +157,11 @@ export function VideoUploadPage() {
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="url">
             <Link2 className="h-4 w-4 mr-2" />
-            视频链接
+            {t('videoUpload.videoLink')}
           </TabsTrigger>
           <TabsTrigger value="file">
             <Upload className="h-4 w-4 mr-2" />
-            本地文件
+            {t('videoUpload.localFile')}
           </TabsTrigger>
         </TabsList>
 
@@ -168,17 +170,17 @@ export function VideoUploadPage() {
           <form onSubmit={urlForm.handleSubmit(handleUrlSubmit)} className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>提交视频链接</CardTitle>
+                <CardTitle>{t('videoUpload.submitLink')}</CardTitle>
                 <CardDescription>
-                  支持 YouTube、Bilibili 等主流视频平台，或直接视频文件直链
+                  {t('videoUpload.supportedPlatforms')}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="url">视频链接</Label>
+                  <Label htmlFor="url">{t('videoUpload.videoLink')}</Label>
                   <Input
                     id="url"
-                    placeholder="https://www.youtube.com/watch?v=... 或 https://www.bilibili.com/video/..."
+                    placeholder={t('videoUpload.urlPlaceholder')}
                     {...urlForm.register('url')}
                     disabled={isSubmitting}
                   />
@@ -195,12 +197,12 @@ export function VideoUploadPage() {
                       return site ? (
                         <Badge variant="secondary" className="gap-1">
                           <span>{site.icon}</span>
-                          <span>检测到: {site.name}</span>
+                          <span>{t('videoUpload.detectedSite', { site: site.name })}</span>
                           <CheckCircle className="h-3 w-3 text-green-500" />
                         </Badge>
                       ) : (
                         <Badge variant="outline">
-                          通用视频链接
+                          {t('videoUpload.genericLink')}
                         </Badge>
                       )
                     })()}
@@ -209,7 +211,7 @@ export function VideoUploadPage() {
 
                 <Button type="submit" className="w-full" size="lg" loading={isSubmitting}>
                   <Loader2 className="h-4 w-4 mr-2" />
-                  开始处理
+                  {t('videoUpload.startProcessing')}
                 </Button>
               </CardContent>
             </Card>
@@ -217,7 +219,7 @@ export function VideoUploadPage() {
             {/* Supported sites */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">支持的平台</CardTitle>
+                <CardTitle className="text-lg">{t('videoUpload.supportedPlatforms')}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
@@ -238,9 +240,9 @@ export function VideoUploadPage() {
           <form onSubmit={fileForm.handleSubmit(handleFileSubmit)} className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>上传本地视频</CardTitle>
+                <CardTitle>{t('videoUpload.fileTitle')}</CardTitle>
                 <CardDescription>
-                  支持 MP4、MOV、AVI、MKV、WebM、FLV 格式，最大 2GB
+                  {t('videoUpload.fileDesc')}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -262,9 +264,10 @@ export function VideoUploadPage() {
                     accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,video/x-flv"
                     onChange={(e) => {
                       const file = e.target.files?.[0]
-                      // 不走 register('file')：RHF 会在 ref 挂载时把 input.files 这个空 FileList 自动塞进 form state
-                      // 导致 watchedFile 在 mount 时就是 truthy 但 .name/.size 为 undefined，看上去像选了文件其实没选
-                      // 这里手动 setValue 单个 File（或 undefined）：zod z.instanceof(File) 才能正确校验
+                      // Don't use register('file') here: RHF would auto-insert the empty FileList at mount
+                      // which makes watchedFile truthy but with undefined .name/.size, appearing as if a file
+                      // was selected when it wasn't. Manually setValue with a single File (or undefined) so
+                      // zod z.instanceof(File) validates correctly.
                       fileForm.setValue('file', file as any, { shouldValidate: true })
                     }}
                     style={{
@@ -289,7 +292,7 @@ export function VideoUploadPage() {
                   >
                     <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                     <p className="text-lg font-medium">
-                      {watchedFile ? '已选择文件' : '点击或拖拽上传视频文件'}
+                      {watchedFile ? t('videoUpload.selectedFile') : t('videoUpload.clickOrDrag')}
                     </p>
                     {watchedFile && (
                       <div className="mt-2 text-sm text-muted-foreground">
@@ -314,7 +317,7 @@ export function VideoUploadPage() {
                   disabled={!watchedFile || isSubmitting}
                 >
                   <Loader2 className="h-4 w-4 mr-2" />
-                  上传并处理
+                  {t('videoUpload.uploadingAndProcessing')}
                 </Button>
               </CardContent>
             </Card>
@@ -325,11 +328,9 @@ export function VideoUploadPage() {
                 <div className="flex items-start gap-3 text-sm text-muted-foreground">
                   <span className="flex-shrink-0 mt-0.5">ℹ️</span>
                   <div>
-                    <p className="font-medium text-foreground mb-1">注意</p>
+                    <p className="font-medium text-foreground mb-1">{t('videoUpload.note')}</p>
                     <p>
-                      文件上传需要后端实现 <code className="px-1 bg-muted rounded">/api/videos/upload</code> 端点，
-                      支持 multipart/form-data 上传到 MinIO 并返回 content_hash，
-                      前端再调用 pipeline 提交接口。
+                      {t('videoUpload.noteDesc')}
                     </p>
                   </div>
                 </div>

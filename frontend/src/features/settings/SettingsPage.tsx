@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { userApi } from '@/lib/api'
+import i18n from '@/i18n'
+import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -11,10 +13,11 @@ import { Settings, Loader2, Check, Sun, Moon, Monitor, Save, AlertCircle, UserCi
 type Theme = 'light' | 'dark' | 'system'
 
 export function SettingsPage() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [theme, setTheme] = useState<Theme>('system')
   const [defaultModel, setDefaultModel] = useState('')
-  const [language, setLanguage] = useState('zh-CN')
+  const [language, setLanguage] = useState('en-US')
   const [dirty, setDirty] = useState(false)
 
   const { data: config, isLoading } = useQuery({
@@ -27,7 +30,7 @@ export function SettingsPage() {
     if (config) {
       setTheme((config.theme as Theme) ?? 'system')
       setDefaultModel(config.default_model ?? '')
-      setLanguage(config.language ?? 'zh-CN')
+      setLanguage(config.language ?? 'en-US')
       setDirty(false)
     }
   }, [config])
@@ -41,15 +44,40 @@ export function SettingsPage() {
   })
 
   const handleSave = () => {
-    updateMutation.mutate({ theme, default_model: defaultModel || null, language })
+    updateMutation.mutate({ theme, default_model: defaultModel || null })
+  }
+
+  // Language switch is auto-saved (no separate "Save" needed): the dropdown is the only UX, and
+  // DB sync keeps LanguageContext from forcing a re-hydrate on the next /query refetch.
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const prevLang = language
+    const newLang = e.target.value
+    setLanguage(newLang)
+    void i18n.changeLanguage(newLang)
+    // Optimistically update query cache so LanguageContext won't re-emit a stale DB value.
+    queryClient.setQueryData<typeof config>(['user', 'config'], (old) =>
+      old ? { ...old, language: newLang } : old,
+    )
+    updateMutation.mutate(
+      { language: newLang },
+      {
+        onError: () => {
+          setLanguage(prevLang)
+          void i18n.changeLanguage(prevLang)
+          queryClient.setQueryData<typeof config>(['user', 'config'], (old) =>
+            old ? { ...old, language: prevLang } : old,
+          )
+        },
+      },
+    )
   }
 
   const markDirty = () => setDirty(true)
 
   const themeOptions: { value: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { value: 'light', label: '浅色', icon: Sun },
-    { value: 'dark', label: '深色', icon: Moon },
-    { value: 'system', label: '跟随系统', icon: Monitor },
+    { value: 'light', label: t('settings.themeLight'), icon: Sun },
+    { value: 'dark', label: t('settings.themeDark'), icon: Moon },
+    { value: 'system', label: t('settings.themeSystem'), icon: Monitor },
   ]
 
   return (
@@ -57,16 +85,16 @@ export function SettingsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
           <Settings className="h-7 w-7" />
-          设置
+          {t('settings.title')}
         </h1>
-        <p className="text-muted-foreground mt-1">用户偏好配置（auth 实现前绑定到 dev 用户）</p>
+        <p className="text-muted-foreground mt-1">{t('settings.subtitle')}</p>
       </div>
 
       {/* 当前身份 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <UserCircle className="h-5 w-5" /> 当前身份
+            <UserCircle className="h-5 w-5" /> {t('settings.currentIdentity')}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -74,12 +102,12 @@ export function SettingsPage() {
             <div className="animate-pulse h-6 w-40 bg-muted rounded" />
           ) : config ? (
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Dev 用户 ID：</span>
+              <span className="text-muted-foreground">{t('settings.devIdentity')}</span>
               <code className="px-2 py-0.5 rounded bg-muted">{config.user_id}</code>
               <Badge variant="secondary">dev</Badge>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">无法加载用户配置</p>
+            <p className="text-sm text-muted-foreground">{t('utils.unknownError')}</p>
           )}
         </CardContent>
       </Card>
@@ -87,13 +115,13 @@ export function SettingsPage() {
       {/* 偏好配置 */}
       <Card>
         <CardHeader>
-          <CardTitle>偏好</CardTitle>
-          <CardDescription>主题、默认模型、语言。保存后立即生效。</CardDescription>
+          <CardTitle>{t('settings.preferences')}</CardTitle>
+          <CardDescription>{t('settings.preferencesDesc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* 主题 */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">主题</label>
+            <label className="text-sm font-medium">{t('settings.theme')}</label>
             <div className="grid grid-cols-3 gap-2">
               {themeOptions.map((opt) => {
                 const Icon = opt.icon
@@ -120,46 +148,46 @@ export function SettingsPage() {
 
           {/* 默认模型 */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">默认模型</label>
+            <label className="text-sm font-medium">{t('settings.defaultModel')}</label>
             <Input
               value={defaultModel}
               onChange={(e) => { setDefaultModel(e.target.value); markDirty() }}
-              placeholder="如 deepseek-v4-flash-free（留空使用后端默认）"
+              placeholder={t('settings.defaultModelPlaceholder')}
             />
-            <p className="text-xs text-muted-foreground">Agent 分析与 RAG 对话使用的默认 LLM 模型名</p>
+            <p className="text-xs text-muted-foreground">{t('settings.defaultModelHint')}</p>
           </div>
 
-          {/* 语言 */}
+          {/* Language */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">语言</label>
+            <label className="text-sm font-medium">{t('settings.language')}</label>
             <select
               value={language}
-              onChange={(e) => { setLanguage(e.target.value); markDirty() }}
+              onChange={handleLanguageChange}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="zh-CN">简体中文</option>
-              <option value="en-US">English</option>
+              <option value="zh-CN">{t('settings.languageZh')}</option>
+              <option value="en-US">{t('settings.languageEn')}</option>
             </select>
           </div>
 
           {updateMutation.isError && (
             <p className="text-sm text-destructive flex items-center gap-1">
               <AlertCircle className="h-4 w-4" />
-              保存失败：{(updateMutation.error as Error)?.message ?? '未知错误'}
+              {t('settings.saveFailed', { error: (updateMutation.error as Error)?.message ?? t('utils.unknownError') })}
             </p>
           )}
           {updateMutation.isSuccess && !dirty && (
             <p className="text-sm text-success flex items-center gap-1">
-              <Check className="h-4 w-4" /> 已保存
+              <Check className="h-4 w-4" /> {t('utils.saved')}
             </p>
           )}
 
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={!dirty || updateMutation.isPending}>
               {updateMutation.isPending ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> 保存中</>
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> {t('utils.saving')}</>
               ) : (
-                <><Save className="h-4 w-4 mr-2" /> 保存</>
+                <><Save className="h-4 w-4 mr-2" /> {t('settings.save')}</>
               )}
             </Button>
           </div>

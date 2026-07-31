@@ -11,13 +11,15 @@ import {
 } from 'recharts'
 import { healthApi } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
-import { Activity, Database, HardDrive, Layers, RefreshCw, AlertCircle, CheckCircle, Server } from 'lucide-react'
+import { Activity, Database, HardDrive, Layers, RefreshCw, AlertCircle, Server } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
+type ComponentKey = 'postgres' | 'redis' | 'qdrant' | 'minio'
 
 const COMPONENT_META: Record<
-  'postgres' | 'redis' | 'qdrant' | 'minio',
+  ComponentKey,
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   postgres: { label: 'PostgreSQL', icon: Database },
@@ -26,155 +28,154 @@ const COMPONENT_META: Record<
   minio: { label: 'MinIO', icon: HardDrive },
 }
 
+const COMPONENT_KEYS: ComponentKey[] = ['postgres', 'redis', 'qdrant', 'minio']
+
 const POLL_MS = 30000
-const HISTORY_CAP = 30 // 保留最近 30 次轮询（≈15 分钟）
+const HISTORY_CAP = 30 // retain last 30 poll results (≈15 min)
 
 interface HistoryPoint {
-  t: number // epoch ms
-  up: number // UP 组件数 (0-4)
+  up: number // number of UP components (0-4)
+  timestamp: number
 }
 
 export function HealthDashboardPage() {
+  const { t } = useTranslation()
   const [history, setHistory] = useState<HistoryPoint[]>([])
-  const lastTsRef = useRef<number | null>(null)
+  const lastDataRef = useRef<string>('')
 
-  const { data: health, isLoading, isFetching, refetch, dataUpdatedAt } = useQuery({
-    queryKey: ['health', 'ready', 'dashboard'],
+  const { data: healthData, isLoading, refetch } = useQuery({
+    queryKey: ['health'],
     queryFn: () => healthApi.ready(),
     refetchInterval: POLL_MS,
   })
 
-  // 每次拿到新数据就追加点历史（按数据更新时间戳去重，避免 React StrictMode 双触发重复计数）
+  // Push data to history on each new response
   useEffect(() => {
-    if (!health || dataUpdatedAt === lastTsRef.current) return
-    lastTsRef.current = dataUpdatedAt
-    const upCount = Object.values(health.components).filter((v) => v === 'UP').length
-    setHistory((prev) => {
-      const next = [...prev, { t: dataUpdatedAt, up: upCount }]
-      return next.length > HISTORY_CAP ? next.slice(next.length - HISTORY_CAP) : next
-    })
-  }, [health, dataUpdatedAt])
+    if (!healthData) return
 
-  const components = health?.components
-  const overallUp = health?.status === 'UP'
-  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null
+    // Dedup by JSON of data (React 18 StrictMode double-mount in dev)
+    const key = JSON.stringify(healthData)
+    if (key === lastDataRef.current) return
+    lastDataRef.current = key
+
+    const up = healthData.status === 'UP' ? 4 : Object.values(healthData.components ?? {}).filter(Boolean).length
+    setHistory(prev => {
+      const next = [...prev, { up, timestamp: Date.now() }]
+      return next.length > HISTORY_CAP ? next.slice(-HISTORY_CAP) : next
+    })
+  }, [healthData])
+
+  // Typed entries so the key keeps its literal type for indexing the strict components object
+  const componentEntries = COMPONENT_KEYS.map(key => [key, COMPONENT_META[key]] as const)
+  const allHealthy = healthData?.status === 'UP'
+  const hasAnomaly = !allHealthy && healthData !== undefined
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <Activity className="h-7 w-7" />
-            系统健康监控
+            {t('health.title')}
           </h1>
-          <p className="text-muted-foreground mt-1">
-            基础设施组件连通性与可用性，每 {POLL_MS / 1000} 秒自动刷新
-          </p>
+          <p className="text-muted-foreground mt-1">{t('health.subtitle', { interval: POLL_MS / 1000 })}</p>
         </div>
-        <Button variant="outline" onClick={() => refetch()} disabled={isFetching}>
-          <RefreshCw className={cn('h-4 w-4 mr-2', isFetching && 'animate-spin')} />
-          手动刷新
+        <Button variant="outline" onClick={() => refetch()} disabled={isLoading}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+          {t('health.manualRefresh')}
         </Button>
       </div>
 
-      {/* 整体状态横幅 */}
-      {health && !overallUp && (
-        <div className="flex items-center gap-3 p-4 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive">
-          <AlertCircle className="h-5 w-5 shrink-0" />
-          <span className="font-medium">
-            检测到基础设施异常：部分组件 DOWN，相关功能可能不可用。
-          </span>
+      {/* Anomaly Banner */}
+      {hasAnomaly && (
+        <div className="flex items-center gap-2 p-4 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive">
+          <AlertCircle className="h-5 w-5 flex-shrink-0" />
+          <span className="font-medium">{t('health.anomalyDetected')}</span>
+          <span className="text-sm">{t('health.anomalyDesc')}</span>
         </div>
       )}
 
-      {/* 组件状态卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {(Object.keys(COMPONENT_META) as Array<keyof typeof COMPONENT_META>).map((key) => {
-          const meta = COMPONENT_META[key]
-          const value = components?.[key]
-          const up = value === 'UP'
+      {/* Component Status Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {componentEntries.map(([key, meta]) => {
           const Icon = meta.icon
+          const value = healthData?.components?.[key]
+          const isUp = value === 'UP'
+          const isUnknown = value === undefined || value === null
           return (
-            <Card key={key} className={cn(up ? 'border-success/30' : 'border-destructive/40')}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon className={cn('h-5 w-5', up ? 'text-success' : 'text-destructive')} />
-                    <CardTitle className="text-base">{meta.label}</CardTitle>
-                  </div>
-                  <Badge variant={up ? 'success' : 'destructive'} className="gap-1">
-                    {up ? <CheckCircle className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
-                    {value ?? '—'}
-                  </Badge>
+            <Card key={key} className={cn(isUp && 'border-green-500/30', !isUp && !isUnknown && 'border-destructive/30')}>
+              <CardContent className="p-4 flex items-center gap-3">
+                <Icon className={cn('h-8 w-8', isUp ? 'text-green-500' : 'text-muted-foreground')} />
+                <div>
+                  <p className="font-medium text-sm">{meta.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isUnknown
+                      ? t('health.checking')
+                      : isUp
+                        ? t('health.connected')
+                        : t('health.disconnected')}
+                  </p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  {isLoading
-                    ? '检测中…'
-                    : up
-                      ? '连接正常'
-                      : '无法连接，请检查容器是否在运行'}
-                </p>
               </CardContent>
             </Card>
           )
         })}
       </div>
 
-      {/* 可用性时间线 —— 前端本地累加轮询结果，非后端延迟数据 */}
+      {/* If still loading skeleton */}
+      {isLoading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i} className="animate-pulse"><CardContent className="p-4" /></Card>
+          ))}
+        </div>
+      )}
+
+      {/* Availability Timeline */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            可用性时间线
-          </CardTitle>
+          <CardTitle>{t('health.availabilityTimeline')}</CardTitle>
           <CardDescription>
-            最近 {history.length} 次轮询中 UP 组件数量（0–4）。轮询结果由前端本地累加，无后端延迟数据源。
+            {t('health.timelineDesc', { count: history.length })}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {history.length === 0 ? (
-            <div className="h-[240px] flex items-center justify-center text-muted-foreground">
-              等待首轮轮询数据…
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={history} margin={{ top: 8, right: 16, bottom: 8, left: -16 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+          {history.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={history}>
+                <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
-                  dataKey="t"
-                  type="number"
-                  domain={['dataMin', 'dataMax']}
-                  scale="time"
+                  dataKey="timestamp"
                   tickFormatter={(v) => new Date(v).toLocaleTimeString()}
-                  stroke="currentColor"
-                  className="text-xs text-muted-foreground"
+                  tick={{ fontSize: 10 }}
                 />
-                <YAxis domain={[0, 4]} ticks={[0, 1, 2, 3, 4]} stroke="currentColor" className="text-xs text-muted-foreground" />
+                <YAxis domain={[0, 4]} tickCount={5} tick={{ fontSize: 10 }} />
                 <Tooltip
-                  labelFormatter={(v) => new Date(Number(v)).toLocaleString()}
-                  formatter={(v) => [`${v} / 4 个组件 UP`, '健康度']}
-                  contentStyle={{ borderRadius: 8 }}
+                  labelFormatter={(v) => new Date(v as number).toLocaleString()}
+                  formatter={(v: number) => [t('health.upOfFour', { count: v }), t('health.healthy')]}
                 />
                 <Line
-                  type="stepAfter"
+                  type="monotone"
                   dataKey="up"
-                  stroke={overallUp ? '#16a34a' : '#dc2626'}
+                  stroke="hsl(var(--primary))"
                   strokeWidth={2}
                   dot={false}
-                  isAnimationActive={false}
+                  activeDot={{ r: 4 }}
                 />
               </LineChart>
             </ResponsiveContainer>
+          ) : (
+            <p className="text-center text-muted-foreground py-8">{t('health.waiting')}</p>
           )}
         </CardContent>
       </Card>
 
-      {/* 元信息 */}
-      <p className="text-xs text-muted-foreground">
-        上次更新：{lastUpdated ? lastUpdated.toLocaleString() : '尚未获取'} ·
-        轮询间隔 {POLL_MS / 1000}s · 端点 <code className="px-1 py-0.5 rounded bg-muted">GET /api/health/ready</code>
+      {/* Last Updated & Meta */}
+      <p className="text-xs text-muted-foreground text-right">
+        {t('health.lastUpdated', { time: healthData ? new Date().toLocaleString() : t('health.waiting') })} ·{' '}
+        {t('health.pollInterval', { interval: POLL_MS / 1000 })} ·{' '}
+        <code className="px-1 py-0.5 rounded bg-muted">{t('health.endpoint')}</code>
       </p>
     </div>
   )

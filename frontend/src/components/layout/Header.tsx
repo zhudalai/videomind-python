@@ -1,8 +1,10 @@
 import { Button } from '@/components/ui/Button'
 import { Bell, Search, Moon, Sun, Menu } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export function Header() {
+  const { t } = useTranslation()
   const [darkMode, setDarkMode] = useState(false)
 
   return (
@@ -10,16 +12,16 @@ export function Header() {
       <div className="flex w-full items-center justify-between gap-4">
         {/* Left: Mobile menu button + Search */}
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" className="lg:hidden" aria-label="打开菜单">
+          <Button variant="ghost" size="icon" className="lg:hidden" aria-label={t('header.openMenu')}>
             <Menu className="h-5 w-5" />
           </Button>
           <div className="relative hidden sm:block">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               type="search"
-              placeholder="搜索视频、内容..."
+              placeholder={t('header.searchPlaceholder')}
               className="h-9 w-64 rounded-md border bg-background px-9 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-              aria-label="搜索"
+              aria-label={t('header.search')}
             />
           </div>
         </div>
@@ -30,19 +32,19 @@ export function Header() {
             variant="ghost"
             size="icon"
             onClick={() => setDarkMode(!darkMode)}
-            aria-label={darkMode ? '切换到浅色模式' : '切换到深色模式'}
+            aria-label={darkMode ? t('header.switchToLight') : t('header.switchToDark')}
           >
             {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </Button>
-          <Button variant="ghost" size="icon" aria-label="通知">
+          <Button variant="ghost" size="icon" aria-label={t('header.notifications')}>
             <Bell className="h-5 w-5" />
           </Button>
           <div className="relative">
-            <Button variant="ghost" className="gap-2" aria-label="用户菜单">
+            <Button variant="ghost" className="gap-2" aria-label={t('header.userMenu')}>
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-medium">
-                用
+                {t('header.userAvatar')}
               </div>
-              <span className="hidden sm:block">用户</span>
+              <span className="hidden sm:block">{t('header.user')}</span>
             </Button>
           </div>
         </div>

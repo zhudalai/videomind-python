@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Construction, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
 
 interface PlaceholderPageProps {
   title: string
@@ -15,6 +16,7 @@ interface PlaceholderPageProps {
 }
 
 export function PlaceholderPage({ title, description, icon, action }: PlaceholderPageProps) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
 
   return (
@@ -30,12 +32,12 @@ export function PlaceholderPage({ title, description, icon, action }: Placeholde
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <AlertCircle className="h-4 w-4" />
-            <span>此功能正在开发中，敬请期待</span>
+            <span>{t('placeholder.underConstruction')}</span>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => navigate(-1)}>
               <ArrowLeft className="h-4 w-4 mr-2" />
-              返回
+              {t('placeholder.goBack')}
             </Button>
             {action && (
               <Button asChild>

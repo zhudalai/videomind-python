@@ -22,19 +22,19 @@ import {
 } from 'lucide-react'
 import type { MediaFileResponse } from '@/types/api'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 
 const STATUS_OPTIONS = ['all', 'ready', 'downloading', 'transcoding', 'asr', 'ocr', 'indexing', 'claimed', 'failed'] as const
 type StatusFilter = typeof STATUS_OPTIONS[number]
 
 export function VideoLibraryPage() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState(searchParams.get('search') || '')
   const [status, setStatus] = useState<StatusFilter>((searchParams.get('status') as StatusFilter) || 'all')
   const [page, setPage] = useState(parseInt(searchParams.get('page') || '1', 10))
   const [pageSize] = useState(12)
-  // 正在删除的视频 id（用于触发对应卡片 spinner / 禁用更多按钮）
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  // 删除失败时的错误提示，给一点可读时间（避免 alert 一闪即逝）
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
@@ -75,19 +75,17 @@ export function VideoLibraryPage() {
   const handleDelete = async (video: MediaFileResponse) => {
     const isInProgress = video.status !== 'ready' && video.status !== 'failed'
     const msg = isInProgress
-      ? `确定要删除这个未完成的视频吗？（当前状态：${video.status}）\n它可能正在被处理，但后端支持强制级联删除 — 此操作不可恢复。`
-      : '确定要删除这个视频吗？此操作不可恢复。'
+      ? t('dashboard.deleteInProgressConfirm', { status: video.status })
+      : t('dashboard.deleteConfirm')
     if (!confirm(msg)) return
     setDeletingId(video.id)
     try {
       await videoApi.delete(video.id)
-      // 用 removeQueries 把缓存直接清掉，避免 refetch 仍有 stale 帧
       queryClient.removeQueries({ queryKey: ['video', video.id] })
       refetch()
     } catch (e: unknown) {
       const msg = extractErrorMessage(e)
       setDeleteError(msg)
-      // 2.6s 后自动清掉
       setTimeout(() => setDeleteError((curr) => (curr === msg ? null : curr)), 2600)
     } finally {
       setDeletingId(null)
@@ -99,15 +97,15 @@ export function VideoLibraryPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">视频库</h1>
-          <p className="text-muted-foreground mt-1">管理和浏览所有已处理的视频</p>
-       </div>
+          <h1 className="text-3xl font-bold tracking-tight">{t('videoLibrary.title')}</h1>
+          <p className="text-muted-foreground mt-1">{t('videoLibrary.subtitle')}</p>
+        </div>
         <Link to="/upload">
-          <Button size="lg"><Video className="h-4 w-4 mr-2" /> 上传新视频</Button>
-       </Link>
-         </div>
+          <Button size="lg"><Video className="h-4 w-4 mr-2" /> {t('videoLibrary.uploadNew')}</Button>
+        </Link>
+      </div>
 
-      {/* 删除失败提示 — 别用 alert（一闪就没）,挂顶部易看见 */}
+      {/* delete error banner */}
       {deleteError && (
         <div
           role="alert"
@@ -120,9 +118,9 @@ export function VideoLibraryPage() {
             className="text-xs underline underline-offset-2 hover:opacity-80"
             onClick={() => setDeleteError(null)}
           >
-            知道了
-     </button>
-     </div>
+            {t('utils.ok')}
+          </button>
+        </div>
       )}
 
       {/* Search & Filter */}
@@ -132,12 +130,12 @@ export function VideoLibraryPage() {
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="搜索文件名、来源 URL..."
+                placeholder={t('videoLibrary.searchPlaceholder')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-10"
               />
-           </div>
+            </div>
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
               <select
@@ -147,14 +145,14 @@ export function VideoLibraryPage() {
               >
                 {STATUS_OPTIONS.map(s => (
                   <option key={s} value={s}>
-                    {s === 'all' ? '全部状态' : s.charAt(0).toUpperCase() + s.slice(1)}
-                 </option>
+                    {s === 'all' ? t('videoLibrary.filterAll') : s.charAt(0).toUpperCase() + s.slice(1)}
+                  </option>
                 ))}
-             </select>
-           </div>
-         </form>
-       </CardContent>
-     </Card>
+              </select>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Video Grid */}
       {isLoading ? (
@@ -162,22 +160,22 @@ export function VideoLibraryPage() {
           {[...Array(8)].map((_, i) => (
             <VideoCardSkeleton key={i} />
           ))}
-       </div>
+        </div>
       ) : videos?.items.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Video className="h-16 w-16 mx-auto text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-medium mb-2">暂无视频</h3>
+            <h3 className="text-lg font-medium mb-2">{t('videoLibrary.noVideos')}</h3>
             <p className="text-muted-foreground mb-4">
-              {search || status !== 'all' ? '尝试调整搜索条件或筛选器' : '上传第一个视频开始体验'}
-           </p>
+              {search || status !== 'all' ? t('videoLibrary.noResults') : t('videoLibrary.noVideosSub')}
+            </p>
             {(!search && status === 'all') && (
               <Link to="/upload">
-                <Button className="mt-2"><Video className="h-4 w-4 mr-2" /> 上传视频</Button>
-             </Link>
+                <Button className="mt-2"><Video className="h-4 w-4 mr-2" /> {t('videoLibrary.uploadVideo')}</Button>
+              </Link>
             )}
-         </CardContent>
-       </Card>
+          </CardContent>
+        </Card>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -201,10 +199,10 @@ export function VideoLibraryPage() {
                 disabled={page <= 1}
               >
                 <ChevronLeft className="h-4 w-4" />
-             </Button>
+              </Button>
               <span className="px-4 text-sm text-muted-foreground">
-                第 {page} 页 / 共 {videos.total_pages} 页 ({videos.total} 条)
-             </span>
+                {t('videoLibrary.pageInfo', { page, totalPages: videos.total_pages, total: videos.total })}
+              </span>
               <Button
                 variant="outline"
                 size="sm"
@@ -212,12 +210,12 @@ export function VideoLibraryPage() {
                 disabled={page >= videos.total_pages}
               >
                 <ChevronRight className="h-4 w-4" />
-             </Button>
-           </div>
+              </Button>
+            </div>
           )}
         </>
       )}
-   </div>
+    </div>
   )
 }
 
@@ -230,12 +228,12 @@ function VideoCard({
   onDelete: (video: MediaFileResponse) => void
   isDeleting: boolean
 }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [showMenu, setShowMenu] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
   const moreRef = useRef<HTMLDivElement>(null)
 
-  // 点 dropdown 外面 → 关菜单
   useEffect(() => {
     if (!showMenu) return
     const handler = (e: MouseEvent) => {
@@ -261,32 +259,32 @@ function VideoCard({
       className={cn('group relative overflow-hidden', isDeleting && 'opacity-70')}
       onClick={handleClick}
     >
-      {/* 删除中的遮罩 + spinner */}
+      {/* deleting overlay + spinner */}
       {isDeleting && (
         <div className="absolute inset-0 z-10 bg-background/60 flex items-center justify-center pointer-events-none">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
-       </div>
+        </div>
       )}
 
       {/* Thumbnail */}
       <div className="aspect-video bg-muted relative overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center">
           <Video className="h-12 w-12 text-muted-foreground/50" />
-       </div>
+        </div>
         <div className="absolute top-2 right-2">
           <Badge className={`${statusColor} gap-1`}>
             {isReady && <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />}
             {video.status}
-         </Badge>
-       </div>
+          </Badge>
+        </div>
         {video.status === 'ready' && (
           <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <Button variant="secondary" size="icon" onClick={(e) => { e.stopPropagation(); navigate(`/videos/${video.id}`) }}>
               <Eye className="h-4 w-4" />
-           </Button>
-         </div>
+            </Button>
+          </div>
         )}
-     </div>
+      </div>
 
       <CardContent className="p-4 space-y-3">
         <h3 className="font-medium line-clamp-1" title={video.filename}>{video.filename}</h3>
@@ -296,43 +294,40 @@ function VideoCard({
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
               {formatDuration(video.duration_ms)}
-           </span>
+            </span>
           )}
           {video.file_size && (
             <span className="flex items-center gap-1">
               <FileText className="h-3 w-3" />
               {formatFileSize(video.file_size)}
-           </span>
+            </span>
           )}
           <span>{formatRelativeTime(video.created_at)}</span>
-       </div>
+        </div>
 
         {video.source_url && (
           <p className="text-xs text-muted-foreground/70 truncate" title={video.source_url}>
-            来源: {video.source_url}
-         </p>
+            {t('videoCard.source')}: {video.source_url}
+          </p>
         )}
 
         {video.error_message && (
           <p className="text-xs text-destructive line-clamp-1">{video.error_message}</p>
         )}
 
-        {/* 操作栏 — 删除按钮直接露在卡片表面（红色 destructive）,无需点三点 */}
         <div className="flex items-center justify-between pt-2 border-t">
-          {/* 左侧:详情 + 处理进度 */}
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/videos/${video.id}`) }}>
               <Eye className="h-3.5 w-3.5 mr-1" />
-              详情
-           </Button>
+              {t('videoLibrary.details')}
+            </Button>
             {isReady && (
               <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/videos/${video.id}/progress`) }}>
                 <FileText className="h-3.5 w-3.5 mr-1" />
-                处理进度
-             </Button>
+                {t('pipeline.viewDetails')}
+              </Button>
             )}
-         </div>
-          {/* 右侧:删除（显眼）+ More（次级折叠） */}
+          </div>
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"
@@ -340,11 +335,11 @@ function VideoCard({
               disabled={isDeleting}
               onClick={(e) => { e.stopPropagation(); onDelete(video) }}
               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-              title="删除视频"
-              aria-label="删除视频"
+              title={t('videoLibrary.delete')}
+              aria-label={t('videoLibrary.delete')}
             >
               <Trash2 className="h-4 w-4" />
-           </Button>
+            </Button>
             <div className="relative" ref={moreRef}>
               <Button
                 variant="ghost"
@@ -353,12 +348,11 @@ function VideoCard({
                 onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu) }}
                 aria-haspopup="menu"
                 aria-expanded={showMenu}
-                title="更多操作"
-                aria-label="更多操作"
+                title={t('utils.moreActions')}
+                aria-label={t('utils.moreActions')}
               >
                 <MoreHorizontal className="h-4 w-4" />
-             </Button>
-              {/* Dropdown Menu — 锚在 More 按钮下方,下拉里只剩次级跳转 */}
+              </Button>
               {showMenu && !isDeleting && (
                 <div
                   role="menu"
@@ -371,8 +365,8 @@ function VideoCard({
                     className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
                     onClick={() => { navigate(`/videos/${video.id}`); setShowMenu(false) }}
                   >
-                    <Eye className="h-4 w-4" /> 查看详情
-                 </button>
+                    <Eye className="h-4 w-4" /> {t('videoCard.view')}
+                  </button>
                   {isReady && (
                     <button
                       type="button"
@@ -380,16 +374,16 @@ function VideoCard({
                       className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex items-center gap-2"
                       onClick={() => { navigate(`/videos/${video.id}/progress`); setShowMenu(false) }}
                     >
-                      <FileText className="h-4 w-4" /> 处理进度
-                   </button>
+                      <FileText className="h-4 w-4" /> {t('videoLibrary.progress')}
+                    </button>
                   )}
-               </div>
+                </div>
               )}
-           </div>
-         </div>
-       </div>
-     </CardContent>
-   </Card>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -403,7 +397,7 @@ function VideoCardSkeleton() {
       <div className="flex gap-2">
         <div className="h-8 bg-muted rounded flex-1" />
         <div className="h-8 bg-muted rounded w-20" />
-     </div>
-   </Card>
+      </div>
+    </Card>
   )
 }

@@ -36,6 +36,8 @@ export function formatDate(date: string | Date): string {
   })
 }
 
+import i18n from '@/i18n'
+
 export function formatRelativeTime(date: string | Date): string {
   const now = new Date()
   const then = new Date(date)
@@ -44,11 +46,12 @@ export function formatRelativeTime(date: string | Date): string {
   const diffMins = Math.floor(diffSecs / 60)
   const diffHours = Math.floor(diffMins / 60)
   const diffDays = Math.floor(diffHours / 24)
+  const t = i18n.t.bind(i18n)
 
-  if (diffSecs < 60) return '刚刚'
-  if (diffMins < 60) return `${diffMins}分钟前`
-  if (diffHours < 24) return `${diffHours}小时前`
-  if (diffDays < 7) return `${diffDays}天前`
+  if (diffSecs < 60) return t('utils.justNow')
+  if (diffMins < 60) return t('utils.minutesAgo', { count: diffMins })
+  if (diffHours < 24) return t('utils.hoursAgo', { count: diffHours })
+  if (diffDays < 7) return t('utils.daysAgo', { count: diffDays })
   return formatDate(date)
 }
 
@@ -83,17 +86,19 @@ export function getStageProgress(stage: string): number {
   return progress[stage] ?? 0
 }
 
+// Stage → i18n key map. Consumers render with t(STAGE_LABELS[stage]).
+// Storing keys (not localized strings) keeps labels reactive to language switches.
 export const STAGE_LABELS: Record<IngestionStage, string> = {
-  claimed: '已认领',
-  downloading: '下载中',
-  downloaded: '下载完成',
-  transcoding: '转码中',
-  transcoded: '转码完成',
-  asr: '语音识别',
-  ocr: '文字识别',
-  indexing: '索引构建',
-  completed: '完成',
-  failed: '失败',
+  claimed: 'pipeline.stageClaimed',
+  downloading: 'pipeline.stageDownloading',
+  downloaded: 'pipeline.stageDownloaded',
+  transcoding: 'pipeline.stageTranscoding',
+  transcoded: 'pipeline.stageTranscoded',
+  asr: 'pipeline.stageAsr',
+  ocr: 'pipeline.stageOcr',
+  indexing: 'pipeline.stageIndexing',
+  completed: 'pipeline.stageCompleted',
+  failed: 'pipeline.stageFailed',
 }
 
 export const STAGE_ORDER: IngestionStage[] = [
@@ -121,5 +126,5 @@ export function extractErrorMessage(error: unknown): string {
     if (typeof e.message === 'string' && e.message) return e.message
   }
   if (typeof error === 'string') return error
-  return '操作失败，请重试'
+  return i18n.t('utils.operationFailed')
 }

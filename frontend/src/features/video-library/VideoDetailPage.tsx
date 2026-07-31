@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
-import { cn, formatRelativeTime, getStatusColor, formatFileSize, STAGE_LABELS, STAGE_ORDER } from '@/lib/utils'
+import { cn, formatRelativeTime, getStatusColor, formatFileSize, formatDuration, STAGE_LABELS, STAGE_ORDER } from '@/lib/utils'
 import {
   ArrowLeft,
   Video,
@@ -23,8 +23,10 @@ import {
 } from 'lucide-react'
 import type { VideoSegmentResponse, SegmentsListResponse, OCRResultResponse } from '@/types/api'
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export function VideoDetailPage() {
+  const { t } = useTranslation()
   const { id: mediaId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('transcription')
@@ -88,7 +90,7 @@ export function VideoDetailPage() {
   }, [ocrData])
 
   if (!mediaId) {
-    return <div className="flex items-center justify-center h-64 text-muted-foreground">无效的视频 ID</div>
+    return <div className="flex items-center justify-center h-64 text-muted-foreground">{t('videoDetail.invalidId')}</div>
   }
 
   if (videoLoading) {
@@ -99,9 +101,9 @@ export function VideoDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center">
         <Video className="h-12 w-12 text-muted-foreground/50 mb-4" />
-        <h2 className="text-xl font-medium mb-2">视频不存在</h2>
-        <p className="text-muted-foreground mb-4">找不到 ID 为 {mediaId.slice(0, 8)}... 的视频</p>
-        <Button onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4 mr-2" /> 返回</Button>
+        <h2 className="text-xl font-medium mb-2">{t('videoDetail.notFound')}</h2>
+        <p className="text-muted-foreground mb-4">{t('videoDetail.notFoundSub', { id: mediaId.slice(0, 8) })}</p>
+        <Button onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4 mr-2" /> {t('videoDetail.back')}</Button>
       </div>
     )
   }
@@ -141,13 +143,13 @@ export function VideoDetailPage() {
           {video.status !== 'ready' && video.status !== 'failed' && (
             <Button variant="outline" onClick={() => navigate(`/videos/${mediaId}/progress`)}>
               <Settings className="h-4 w-4 mr-2" />
-              查看进度
+              {t('videoDetail.viewProgress')}
             </Button>
           )}
           {video.status === 'ready' && (
             <Button onClick={() => navigate(`/videos/${mediaId}/progress`)}>
               <FileText className="h-4 w-4 mr-2" />
-              处理详情
+              {t('videoDetail.details')}
             </Button>
           )}
         </div>
@@ -159,7 +161,7 @@ export function VideoDetailPage() {
           <CardContent className="pt-6">
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <Download className="h-4 w-4" />
-              <span className="font-medium">来源链接:</span>
+              <span className="font-medium">{t('videoDetail.sourceLink')}</span>
               <a href={video.source_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate flex-1">
                 {video.source_url}
               </a>
@@ -176,9 +178,9 @@ export function VideoDetailPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Settings className="h-5 w-5" />
-            处理阶段进度
+            {t('videoDetail.processingStages')}
           </CardTitle>
-          <CardDescription>视频处理管线的各阶段完成情况</CardDescription>
+          <CardDescription>{t('videoDetail.processingDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -208,10 +210,10 @@ export function VideoDetailPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between text-sm mb-1">
                       <span className={cn('font-medium', isCurrent && 'text-primary', isFailed && 'text-destructive')}>
-                        {STAGE_LABELS[stage] || stage}
+                        {t(STAGE_LABELS[stage] || stage)}
                       </span>
                       <span className="text-muted-foreground">
-                        {isCompleted ? '100%' : stageProgress >= 0 ? `${Math.round(stageProgress)}%` : '等待中'}
+                        {isCompleted ? '100%' : stageProgress >= 0 ? `${Math.round(stageProgress)}%` : t('utils.waiting')}
                       </span>
                     </div>
                     <Progress value={Math.max(0, isCompleted ? 100 : stageProgress)} className="h-1.5" />
@@ -230,8 +232,8 @@ export function VideoDetailPage() {
             <div className="flex items-start gap-3 p-4 bg-destructive/10 rounded-lg">
               <Settings className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-medium text-destructive">处理失败</p>
-                <p className="text-sm text-muted-foreground mt-1">{video.error_message}</p>
+                <p className="font-medium text-destructive">{t('videoDetail.processingFailed')}</p>
+                <p className="text-sm text-muted-foreground mt-1">{t('videoDetail.errorMessage', { msg: video.error_message })}</p>
               </div>
             </div>
           </CardContent>
@@ -244,15 +246,15 @@ export function VideoDetailPage() {
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="transcription">
               <FileText className="h-4 w-4 mr-2" />
-              转录文本
+              {t('videoDetail.transcription')}
             </TabsTrigger>
             <TabsTrigger value="segments">
               <Search className="h-4 w-4 mr-2" />
-              时间段
+              {t('videoDetail.segments')}
             </TabsTrigger>
             <TabsTrigger value="ocr">
               <Database className="h-4 w-4 mr-2" />
-              OCR 识别
+              {t('videoDetail.ocr')}
             </TabsTrigger>
           </TabsList>
 
@@ -265,19 +267,19 @@ export function VideoDetailPage() {
             ) : transcription ? (
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>完整转录文本</CardTitle>
-                  <Badge variant="secondary">{transcription.language || '未知'}</Badge>
+                  <CardTitle>{t('videoDetail.fullText')}</CardTitle>
+                  <Badge variant="secondary">{transcription.language || t('videoDetail.unknown')}</Badge>
                 </CardHeader>
                 <CardContent>
                   <div className="prose max-w-none whitespace-pre-wrap text-sm leading-relaxed">
-                    {transcription.full_text || '暂无转录内容'}
+                    {transcription.full_text || t('videoDetail.noTranscription')}
                   </div>
                   <div className="mt-4 flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(transcription.full_text || '')}>
-                      <Copy className="h-4 w-4 mr-1" /> 复制全文
+                      <Copy className="h-4 w-4 mr-1" /> {t('videoDetail.copyAll')}
                     </Button>
                     <span className="text-sm text-muted-foreground">
-                      {transcription.full_text?.length || 0} 字符
+                      {t('videoDetail.characterCount', { count: transcription.full_text?.length || 0 })}
                     </span>
                   </div>
                 </CardContent>
@@ -285,7 +287,7 @@ export function VideoDetailPage() {
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
-                  暂无转录数据
+                  {t('videoDetail.noTranscription')}
                 </CardContent>
               </Card>
             )}
@@ -300,8 +302,8 @@ export function VideoDetailPage() {
             ) : allSegments.length > 0 ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>时间段列表</CardTitle>
-                  <CardDescription>共 {allSegments.length} 个片段</CardDescription>
+                  <CardTitle>{t('videoDetail.segments')}</CardTitle>
+                  <CardDescription>{t('videoDetail.totalSegments', { count: allSegments.length })}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3 max-h-[600px] overflow-y-auto">
@@ -321,7 +323,7 @@ export function VideoDetailPage() {
                           <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                         ) : (
                           <>
-                            加载更多
+                            {t('utils.loading')}
                             <ChevronDown className="h-4 w-4 ml-1" />
                           </>
                         )}
@@ -333,7 +335,7 @@ export function VideoDetailPage() {
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
-                  暂无时间段数据
+                  {t('videoDetail.noSegmentData')}
                 </CardContent>
               </Card>
             )}
@@ -348,8 +350,8 @@ export function VideoDetailPage() {
             ) : allOcrResults.length > 0 ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>OCR 识别结果</CardTitle>
-                  <CardDescription>共 {ocrData?.pages.reduce((acc, p) => acc + p.items.length, 0) || 0} 帧识别结果</CardDescription>
+                  <CardTitle>{t('videoDetail.ocr')}</CardTitle>
+                  <CardDescription>{t('videoDetail.totalSegments', { count: ocrData?.pages.reduce((acc, p) => acc + p.items.length, 0) || 0 })}</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4 max-h-[600px] overflow-y-auto">
@@ -369,7 +371,7 @@ export function VideoDetailPage() {
                           <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                         ) : (
                           <>
-                            加载更多
+                            {t('utils.loading')}
                             <ChevronDown className="h-4 w-4 ml-1" />
                           </>
                         )}
@@ -382,8 +384,8 @@ export function VideoDetailPage() {
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
                   <Search className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                  <p>暂无 OCR 识别数据</p>
-                  <p className="text-sm mt-1">视频处理完成后将显示帧级文字识别结果</p>
+                  <p>{t('videoDetail.noOcrData')}</p>
+                  <p className="text-sm mt-1">{t('videoDetail.ocrWillAppear')}</p>
                 </CardContent>
               </Card>
             )}
@@ -395,6 +397,7 @@ export function VideoDetailPage() {
 }
 
 function SegmentItem({ segment }: { segment: VideoSegmentResponse }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -409,16 +412,16 @@ function SegmentItem({ segment }: { segment: VideoSegmentResponse }) {
         <div className="flex-1 min-w-0">
           <p className="font-medium line-clamp-1">{segment.transcript || ''}</p>
           <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-            <span>置信度: {Math.round((segment.confidence || 0) * 100)}%</span>
-            <span>时长: {formatDuration(segment.end_ms - segment.start_ms)}</span>
-            {segment.speaker && <span>说话人: {segment.speaker}</span>}
+            <span>{t('videoDetail.confidence')}: {Math.round((segment.confidence || 0) * 100)}%</span>
+            <span>{t('videoDetail.duration')}: {formatDuration(segment.end_ms - segment.start_ms)}</span>
+            {segment.speaker && <span>{t('videoDetail.speaker')}: {segment.speaker}</span>}
           </div>
         </div>
         <ChevronDown className={cn('h-4 w-4 text-muted-foreground flex-shrink-0 mt-1', expanded && 'rotate-180')} />
       </button>
       {expanded && (
         <div className="px-4 pb-4 border-t bg-muted/20 text-sm text-muted-foreground">
-          <p className="font-medium mb-2">完整文本:</p>
+          <p className="font-medium mb-2">{t('videoDetail.fullTextLabel')}</p>
           <p className="whitespace-pre-wrap">{segment.transcript || ''}</p>
         </div>
       )}
@@ -427,6 +430,7 @@ function SegmentItem({ segment }: { segment: VideoSegmentResponse }) {
 }
 
 function OcrItem({ ocr }: { ocr: OCRResultResponse }) {
+  const { t } = useTranslation()
   return (
     <div className="border rounded-lg p-4 bg-muted/30">
       <div className="flex items-start gap-3">
@@ -449,11 +453,11 @@ function OcrItem({ ocr }: { ocr: OCRResultResponse }) {
             <p className="font-mono text-sm whitespace-pre-wrap bg-muted p-2 rounded">{ocr.ocr_text}</p>
           ) : (
             <p className="font-mono text-sm text-muted-foreground italic bg-muted/50 p-2 rounded">
-              未识别到文字
+              {t('videoDetail.noTextRecognized')}
             </p>
           )}
           {ocr.phash && (
-            <p className="text-xs text-muted-foreground mt-1 font-mono">phash: {ocr.phash}</p>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">{t('videoDetail.phash', { hash: ocr.phash })}</p>
           )}
         </div>
       </div>
@@ -483,11 +487,4 @@ function formatTime(ms: number): string {
   const seconds = totalSeconds % 60
   const msPart = Math.floor((ms % 1000) / 100)
   return `${minutes}:${seconds.toString().padStart(2, '0')}.${msPart}`
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
