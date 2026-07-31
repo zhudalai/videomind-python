@@ -145,7 +145,9 @@ export function VideoLibraryPage() {
               >
                 {STATUS_OPTIONS.map(s => (
                   <option key={s} value={s}>
-                    {s === 'all' ? t('videoLibrary.filterAll') : s.charAt(0).toUpperCase() + s.slice(1)}
+                    {t(s === 'all'
+                      ? 'videoLibrary.statusAll'
+                      : `videoLibrary.status${s.charAt(0).toUpperCase()}${s.slice(1)}`)}
                   </option>
                 ))}
               </select>
@@ -274,7 +276,7 @@ function VideoCard({
         <div className="absolute top-2 right-2">
           <Badge className={`${statusColor} gap-1`}>
             {isReady && <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />}
-            {video.status}
+            {t(`videoLibrary.status${video.status.charAt(0).toUpperCase()}${video.status.slice(1)}`)}
           </Badge>
         </div>
         {video.status === 'ready' && (
