@@ -1,8 +1,8 @@
 """Agent Loop 数据结构模块。
 
-定义代理循环所需的 7 个核心数据类型：
+定义代理循环所需的 8 个核心数据类型：
 AgentState, AgentPlan, SubTask, AnalysisResult,
-Conclusion, Evidence, CriticResult。
+Conclusion, Evidence, CriticResult, VideoMeta。
 """
 
 from __future__ import annotations
@@ -21,31 +21,45 @@ class SubTask:
         description: 任务描述
         required_evidence_type: 所需证据类型 ("frame", "text", "audio", "sql")
         time_range_hint: 可选的时间范围提示 (start_ms, end_ms)
+        search_query: 检索友好查询词；为空则 Executor 退化用 description
     """
 
     id: str
     description: str
     required_evidence_type: Literal["frame", "text", "audio", "sql"]
     time_range_hint: tuple[int, int] | None = None
+    search_query: str = ""
+
+
+@dataclass
+class VideoMeta:
+    """单个目标视频元信息（注入 Planner/Executor 上下文）。"""
+
+    media_id: str
+    filename: str
+    duration_ms: int | None = None
 
 
 @dataclass
 class Evidence:
-    """证据条目。
+    """证据条目（承载真实 RAG 检索结果 + 来源视频）。
 
-    Attributes:
-        id: 证据唯一标识
-        timestamp_ms: 证据对应的视频时间戳（毫秒）
-        source: 证据来源 ("frame", "text", "audio", "sql")
-        content: 证据内容描述
-        chunk_id: 关联的 chunk 标识
+    新流程使用 chunk_id/content/source_type/score/start_ms/end_ms/media_id/media_title。
+    timestamp_ms/source 为退役字段（保留默认值以兼容旧 verifier 测试），新代码不写入/不渲染。
     """
 
     id: str
-    timestamp_ms: int
-    source: Literal["frame", "text", "audio", "sql"]
-    content: str
     chunk_id: str = ""
+    content: str = ""
+    source_type: str = ""                 # asr | ocr | mixed（来自 RAG）
+    score: float = 0.0
+    start_ms: int | None = None
+    end_ms: int | None = None
+    media_id: str = ""                    # 来源视频 UUID 字符串
+    media_title: str = ""                 # 来源视频文件名（前端直渲染）
+    # 退役字段（保留默认，兼容旧 verifier 测试；新流程不写入）
+    timestamp_ms: int = 0
+    source: Literal["frame", "text", "audio", "sql"] = "text"
 
 
 @dataclass
@@ -122,6 +136,9 @@ class AgentState:
 
     Attributes:
         goal: 当前目标
+        media_ids: 目标视频 media_id 列表
+        video_meta: 目标视频元信息列表
+        retrieved_evidence_ids: 已检索证据 ID 集合（Executor 填，Critic 读）
         plan: 规划结果（可选）
         result: 分析执行结果（可选）
         critique: 评审结果（可选）
@@ -130,6 +147,9 @@ class AgentState:
     """
 
     goal: str
+    media_ids: list[str] = field(default_factory=list)
+    video_meta: list[VideoMeta] = field(default_factory=list)
+    retrieved_evidence_ids: set[str] = field(default_factory=set)
     plan: AgentPlan | None = None
     result: AnalysisResult | None = None
     critique: CriticResult | None = None
@@ -145,4 +165,5 @@ __all__ = [
     "Conclusion",
     "Evidence",
     "CriticResult",
+    "VideoMeta",
 ]
