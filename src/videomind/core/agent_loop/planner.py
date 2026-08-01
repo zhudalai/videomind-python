@@ -23,8 +23,11 @@ SYSTEM_PROMPT = (
     "你是视频分析任务规划师。将给定的分析目标拆解为 1-5 个可执行子任务。"
     "每个子任务需指定所需证据类型（frame / text / audio / sql）。"
     "如涉及特定时间段，提供 time_range（毫秒）起止值。"
+    "每个子任务还需提供 search_query：面向检索的关键词（如\"商业模式 价格 斜率\"），"
+    "而非完整问句——它将直接送入向量检索。"
     "输出 JSON 格式："
-    '{"tasks": [{"description": "...", "evidence_type": "...", "time_range": [start_ms, end_ms]}, ...], "reasoning": "..."}'
+    '{"tasks": [{"description": "...", "evidence_type": "...", '
+    '"time_range": [start_ms, end_ms], "search_query": "..."}], "reasoning": "..."}'
 )
 
 MAX_TASKS = 5
@@ -55,10 +58,12 @@ class Planner:
             包含最多 ``MAX_TASKS``（5）个子任务的 AgentPlan。
             发生异常时返回空 AgentPlan。
         """
-        prompt = (
-            f"{SYSTEM_PROMPT}\n\n"
-            f"用户目标：{state.goal}"
+        video_names = [vm.filename for vm in state.video_meta]
+        video_section = (
+            f"\n可用视频（共 {len(video_names)} 个）：{', '.join(video_names)}"
+            if video_names else "\n可用视频：未提供"
         )
+        prompt = f"{SYSTEM_PROMPT}\n\n用户目标：{state.goal}{video_section}"
         request = type("ChatRequest", (), {
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
@@ -78,6 +83,7 @@ class Planner:
                     description=task.get("description", ""),
                     required_evidence_type=task.get("evidence_type", "text"),
                     time_range_hint=_parse_time_range(task),
+                    search_query=task.get("search_query", ""),
                 )
                 for i, task in enumerate(data.get("tasks", [])[:MAX_TASKS])
             ]

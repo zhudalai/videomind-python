@@ -92,3 +92,32 @@ async def test_planner_malformed_json_return_empty_plan() -> None:
 
     assert len(plan.tasks) == 0
     assert plan.reasoning == ""
+
+
+@pytest.mark.asyncio
+async def test_planner_extracts_search_query_and_reads_video_list() -> None:
+    """Planner 把视频文件名塞进 prompt，并解析每子任务的 search_query."""
+    from videomind.core.agent_loop.planner import Planner
+    from videomind.core.agent_loop.types import AgentState, VideoMeta
+
+    mock_llm = AsyncMock()
+    mock_llm.chat = AsyncMock()
+    mock_llm.chat.return_value.content = json.dumps({
+        "tasks": [{"description": "找商业模式", "evidence_type": "text",
+                   "search_query": "商业模式 价格 斜率"}],
+        "reasoning": "拆一个子任务",
+    })
+    planner = Planner(mock_llm)
+    state = AgentState(
+        goal="分析视频",
+        media_ids=["m1", "m2"],
+        video_meta=[VideoMeta(media_id="m1", filename="a.mp4"),
+                    VideoMeta(media_id="m2", filename="b.mp4")],
+    )
+    plan = await planner.plan(state)
+
+    assert plan.tasks[0].search_query == "商业模式 价格 斜率"
+    # prompt 里含两个视频文件名
+    sent = mock_llm.chat.call_args.args[0]
+    sent_text = sent.messages[0]["content"]
+    assert "a.mp4" in sent_text and "b.mp4" in sent_text
