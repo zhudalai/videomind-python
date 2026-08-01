@@ -12,31 +12,30 @@ from videomind.core.agent_loop.types import AgentState, AnalysisResult
 
 @pytest.mark.asyncio
 async def test_critic_passes_with_perfect_result() -> None:
-    """LLM 返回高质量评审结果，所有校验通过。"""
+    """LLM 返回高质量评审结果，且真实命中校验通过。"""
     from videomind.core.agent_loop.critic import Critic
     from videomind.core.agent_loop.verifier import EvidenceVerifier
+    from videomind.core.agent_loop.types import Conclusion, Evidence
 
     mock_llm = AsyncMock()
     mock_llm.chat = AsyncMock()
     mock_llm.chat.return_value.content = json.dumps({
-        "passed": True,
-        "feedback": "很好",
-        "required_timestamps": [],
-        "coverage_score": 0.95,
-        "structure_ok": True,
-        "evidence_verified": True,
-        "hallucination_risk": 0.05,
+        "passed": True, "feedback": "很好", "required_timestamps": [],
+        "coverage_score": 0.95, "structure_ok": True,
+        "evidence_verified": True, "hallucination_risk": 0.05,
     })
-
     critic = Critic(mock_llm, EvidenceVerifier())
     state = AgentState(
         goal="分析视频",
-        result=AnalysisResult(title="T"),
+        retrieved_evidence_ids={"EID_real"},
+        result=AnalysisResult(title="T",
+            evidence=[Evidence(id="EID_real", chunk_id="c1", content="x")],
+            conclusions=[Conclusion(point="ok", evidence_ids=["EID_real"])]),
     )
     result = await critic.critique(state)
-
     assert result.passed is True
     assert result.coverage_score == 0.95
+    assert result.evidence_verified is True
 
 
 @pytest.mark.asyncio

@@ -96,19 +96,21 @@ class Critic:
                 hallucination_risk=1.0,
             )
 
-        # 步骤 2: 硬性证据校验
-        verified_passed, _ = self._verifier.verify_all(
-            result.evidence, duration_ms=0
-        )
+        # 步骤 2: 硬性真实命中校验（替换旧的 timestamp 范围校验）
+        retrieved = state.retrieved_evidence_ids
+        ev_ids = {e.id for e in result.evidence}
+        evidence_real = ev_ids <= retrieved
+        conclusions_real = all(set(c.evidence_ids) <= retrieved for c in result.conclusions)
+        hard_passed = evidence_real and conclusions_real
 
         # 步骤 3: 综合结果
         llm_passed = data.get("passed", False)
         return CriticResult(
-            passed=llm_passed and verified_passed,
+            passed=llm_passed and hard_passed,
             feedback=data.get("feedback", ""),
             required_timestamps=data.get("required_timestamps", []),
             coverage_score=data.get("coverage_score", 0.0),
             structure_ok=data.get("structure_ok", False),
-            evidence_verified=verified_passed,
+            evidence_verified=hard_passed,
             hallucination_risk=data.get("hallucination_risk", 0.5),
         )
