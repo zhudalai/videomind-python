@@ -496,6 +496,8 @@ class AnalysisTask(Base):
     )
     goal: Mapped[str] = mapped_column(Text)
     goal_hash: Mapped[str] = mapped_column(String(64))  # SHA256(goal)
+    media_ids_hash: Mapped[str] = mapped_column(String(64), index=True)
+    # 多视频幂等键：sha256(sorted media_ids 逗号连接)；单视频 == sha256(str(media_id))。
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     current_round: Mapped[int] = mapped_column(Integer, default=0)
     max_rounds: Mapped[int] = mapped_column(Integer, default=2)
@@ -512,7 +514,34 @@ class AnalysisTask(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
-        UniqueConstraint("media_id", "goal_hash", name="uq_at_media_goal"),
+        UniqueConstraint("media_ids_hash", "goal_hash", name="uq_at_mediaids_goal"),
+    )
+
+
+class AnalysisTaskMedia(Base):
+    """AnalysisTask ↔ MediaFile 关联表（多视频支持）。
+
+    单条记录表示一个 media 参与一个分析任务；position=0 为 primary media。
+    """
+
+    __tablename__ = "analysis_task_media"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analysis_task.id", ondelete="CASCADE"), index=True
+    )
+    media_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("media_file.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)  # 0 = primary
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "media_id", name="uq_atm_task_media"),
     )
 
 
