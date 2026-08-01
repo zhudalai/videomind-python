@@ -10,9 +10,9 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_executor_generates_analysis_result() -> None:
-    """Executor 调用 LLM 并正确生成 AnalysisResult."""
+    """Executor 调用 LLM 并正确生成 AnalysisResult（命中真实检索证据）。"""
     from videomind.core.agent_loop.executor import Executor
-    from videomind.core.agent_loop.types import AgentState, AgentPlan, SubTask
+    from videomind.core.agent_loop.types import AgentState, AgentPlan, SubTask, VideoMeta
 
     mock_llm = AsyncMock()
     mock_llm.chat = AsyncMock()
@@ -24,14 +24,19 @@ async def test_executor_generates_analysis_result() -> None:
         ],
         "suggestions": ["想要展开第一点", "可以对比其他观点"],
     })
-
-    executor = Executor(mock_llm)
+    mock_retriever = AsyncMock()
+    mock_retriever.search = AsyncMock(return_value=[
+        {"id": "EID_abc12345_01", "chunk_id": "c1", "content": "内容1", "source_type": "asr", "score": 0.9, "start_ms": 0, "end_ms": 1000},
+        {"id": "EID_abc12345_02", "chunk_id": "c2", "content": "内容2", "source_type": "ocr", "score": 0.8, "start_ms": 0, "end_ms": 1000},
+    ])
+    MID = "00000000-0000-0000-0000-000000000001"
+    executor = Executor(mock_llm, retriever=mock_retriever)
     state = AgentState(
         goal="分析视频内容",
-        plan=AgentPlan(
-            tasks=[SubTask(id="task_1", description="提取主题", required_evidence_type="text")],
-            reasoning="一个任务",
-        ),
+        media_ids=[MID],
+        video_meta=[VideoMeta(media_id=MID, filename="a.mp4")],
+        plan=AgentPlan(tasks=[SubTask(id="task_1", description="提取主题",
+                                      required_evidence_type="text")], reasoning="一个任务"),
     )
     result = await executor.execute(state)
 
