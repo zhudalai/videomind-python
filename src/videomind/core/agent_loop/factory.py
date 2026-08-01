@@ -13,11 +13,12 @@ from videomind.core.model_gateway.factory import get_llm_service
 
 
 @lru_cache
-def get_agent_loop() -> AgentLoop:
+def get_agent_loop(retriever=None) -> AgentLoop:
     """装配并返回 AgentLoop 单例。
 
-    从 model_gateway 获取 LLM 服务，组装 Planner/Executor/Critic/Verifier，
-    返回完整的 AgentLoop 实例。
+    Args:
+        retriever: 检索器实例；None 时 Executor 用默认 _RagRetriever。
+                   测试可传 mock retriever。
 
     Returns:
         AgentLoop: 装配好的代理循环实例（lru_cache 单例）。
@@ -25,6 +26,6 @@ def get_agent_loop() -> AgentLoop:
     llm = get_llm_service()
     return AgentLoop(
         planner=Planner(llm),
-        executor=Executor(llm),
+        executor=Executor(llm, retriever=retriever),
         critic=Critic(llm, EvidenceVerifier()),
     )

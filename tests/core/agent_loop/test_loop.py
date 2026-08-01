@@ -93,3 +93,25 @@ async def test_get_agent_loop_is_singleton() -> None:
         b = get_agent_loop()
         assert a is b
         get_agent_loop.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_respects_max_rounds_one() -> None:
+    """max_rounds=1 时，即便 Critic 不通过也只跑 1 轮."""
+    from videomind.core.agent_loop.loop import AgentLoop
+
+    mock_planner = AsyncMock()
+    mock_planner.plan = AsyncMock(return_value=AgentPlan(
+        tasks=[SubTask(id="t1", description="d", required_evidence_type="text")], reasoning="r"))
+    mock_executor = AsyncMock()
+    mock_executor.execute = AsyncMock(return_value=AnalysisResult(
+        title="F", conclusions=[], evidence=[], suggestions=[]))
+    mock_critic = AsyncMock()
+    mock_critic.critique = AsyncMock(return_value=CriticResult(
+        passed=False, feedback="no", coverage_score=0.3))
+
+    loop = AgentLoop(mock_planner, mock_executor, mock_critic)
+    await loop.run("goal", max_rounds=1)
+
+    assert mock_planner.plan.call_count == 1
+    assert mock_critic.critique.call_count == 1
