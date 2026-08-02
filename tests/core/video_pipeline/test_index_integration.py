@@ -101,8 +101,8 @@ class TestIndexerIntegration:
                     ids=[str(index_result.first_chunk_id)],
                 )
                 assert len(point) == 1
-                assert point[0].payload["media_id"] == str(media_id)
-                assert point[0].payload["content"] is not None
+                assert point[0]["payload"]["media_id"] == str(media_id)
+                assert point[0]["payload"]["content"] is not None
 
             # 8. 验证 PG chunk 表有数据
             from sqlalchemy import select

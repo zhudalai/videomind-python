@@ -6,6 +6,7 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.agent_loop.types import AgentState
 
@@ -35,7 +36,8 @@ async def test_planner_parses_valid_json() -> None:
 
     planner = Planner(mock_llm)
     state = AgentState(goal="分析这个视频")
-    plan = await planner.plan(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    plan = await planner.plan(state, mock_db)
 
     assert len(plan.tasks) == 2
     assert plan.reasoning == "需要先了解总体内容再深入细节"
@@ -68,7 +70,8 @@ async def test_planner_limit_five_tasks() -> None:
     mock_llm.chat = AsyncMock(return_value=mock_response)
 
     planner = Planner(mock_llm)
-    plan = await planner.plan(AgentState(goal="测试"))
+    mock_db = AsyncMock(spec=AsyncSession)
+    plan = await planner.plan(AgentState(goal="测试"), mock_db)
 
     assert len(plan.tasks) == 5
     assert plan.tasks[0].description == "task_0"
@@ -87,8 +90,9 @@ async def test_planner_malformed_json_return_empty_plan() -> None:
     mock_llm.chat = AsyncMock(return_value=mock_response)
 
     planner = Planner(mock_llm)
+    mock_db = AsyncMock(spec=AsyncSession)
     state = AgentState(goal="测试")
-    plan = await planner.plan(state)
+    plan = await planner.plan(state, mock_db)
 
     assert len(plan.tasks) == 0
     assert plan.reasoning == ""
@@ -114,7 +118,8 @@ async def test_planner_extracts_search_query_and_reads_video_list() -> None:
         video_meta=[VideoMeta(media_id="m1", filename="a.mp4"),
                     VideoMeta(media_id="m2", filename="b.mp4")],
     )
-    plan = await planner.plan(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    plan = await planner.plan(state, mock_db)
 
     assert plan.tasks[0].search_query == "商业模式 价格 斜率"
     # prompt 里含两个视频文件名

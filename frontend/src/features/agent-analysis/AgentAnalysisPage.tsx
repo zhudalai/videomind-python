@@ -9,6 +9,7 @@ import { Progress } from '@/components/ui/Progress'
 import { cn, formatDate } from '@/lib/utils'
 import {
   Brain,
+  Film,
   Loader2,
   Play,
   CheckCircle,
@@ -38,9 +39,17 @@ export function AgentAnalysisPage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [goal, setGoal] = useState('')
-  const [mediaId, setMediaId] = useState<string>('')
+  const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([])
+  const [showMediaSelector, setShowMediaSelector] = useState(false)
   const [maxRounds, setMaxRounds] = useState<number>(2)
   const [taskId, setTaskId] = useState<string | null>(null)
+
+  const handleMediaToggle = (id: string) =>
+    setSelectedMediaIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
+
+  const isAtMaxVideos = selectedMediaIds.length >= 2
 
   const { data: userConfig } = useQuery({
     queryKey: ['user', 'config', 'dev'],
@@ -76,7 +85,7 @@ export function AgentAnalysisPage() {
     mutationFn: () =>
       analysisApi.create({
         goal: goal.trim(),
-        media_id: mediaId,
+        media_ids: selectedMediaIds,
         user_id: userConfig!.user_id,
         max_rounds: maxRounds,
       }),
@@ -98,11 +107,11 @@ export function AgentAnalysisPage() {
     enabled: !!taskId && !!status && status.status !== 'pending',
   })
 
-  const ctaDisabled = !goal.trim() || !mediaId || !userConfig || createMutation.isPending
+  const ctaDisabled = !goal.trim() || selectedMediaIds.length === 0 || !userConfig || createMutation.isPending
   const canSubmit = !taskId || hasTerminal
 
   const handleSubmit = () => {
-    if (!goal.trim() || !mediaId || !userConfig) return
+    if (!goal.trim() || selectedMediaIds.length === 0 || !userConfig) return
     createMutation.mutate()
   }
 
@@ -144,21 +153,62 @@ export function AgentAnalysisPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('agentAnalysis.targetVideo')}</label>
-              <select
-                value={mediaId}
-                onChange={(e) => setMediaId(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">{t('agentAnalysis.selectVideo')}</option>
-                {videos?.items?.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.filename}
-                  </option>
-                ))}
-              </select>
-              {videos && !videos.items?.length && (
-                <p className="text-xs text-muted-foreground">{t('agentAnalysis.noVideosForAnalysis')}</p>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">{t('agentAnalysis.videoSources')}</label>
+                <Button type="button" variant="ghost" size="sm"
+                  onClick={() => setShowMediaSelector((v) => !v)}>
+                  {t(showMediaSelector ? 'agentAnalysis.collapseVideoSources' : 'agentAnalysis.expandVideoSources')}
+                </Button>
+              </div>
+              {selectedMediaIds.length > 0 && (
+                <Badge variant="secondary" className="gap-1 w-fit">
+                  <Brain className="h-3 w-3" />
+                  {t('agentAnalysis.videoSourcesCount', { count: selectedMediaIds.length })}
+                </Badge>
+              )}
+              {showMediaSelector && (
+                <div className="border rounded-lg p-2 max-h-64 overflow-y-auto space-y-1">
+                  {videos?.items?.map((v) => {
+                    const isSelected = selectedMediaIds.includes(v.id)
+                    const isDisabled = isAtMaxVideos && !isSelected
+                    return (
+                      <label key={v.id} className={cn(
+                        'flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors',
+                        isSelected
+                          ? 'bg-primary/10 border border-primary/20'
+                          : isDisabled
+                          ? 'opacity-50 cursor-not-allowed'
+                          : 'hover:bg-muted/50',
+                      )}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleMediaToggle(v.id)}
+                          disabled={isDisabled}
+                          className="h-4 w-4 rounded border-input text-primary focus:ring-primary disabled:cursor-not-allowed" />
+                        <span className="flex-1 text-sm">{v.filename}</span>
+                        {v.duration_ms != null && (
+                          <span className="text-xs text-muted-foreground">
+                            {(v.duration_ms / 1000).toFixed(0)}s
+                          </span>
+                        )}
+                      </label>
+                    )
+                  })}
+                  {isAtMaxVideos && (
+                    <p className="text-xs text-muted-foreground p-2 text-center">
+                      {t('agentAnalysis.maxVideosReached')}
+                    </p>
+                  )}
+                  {videos && !videos.items?.length && (
+                    <p className="text-xs text-muted-foreground p-2">
+                      {t('agentAnalysis.noVideosForAnalysis')}
+                    </p>
+                  )}
+                </div>
+              )}
+              {!showMediaSelector && (
+                <p className="text-xs text-muted-foreground">{t('agentAnalysis.selectAtLeastOne')}</p>
               )}
             </div>
 
@@ -343,14 +393,24 @@ export function AgentAnalysisPage() {
                 </h3>
                 <ul className="space-y-1.5 text-sm">
                   {(result.evidence_json as any[]).map((e, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <Badge variant="outline" className="shrink-0 text-xs">
-                        {e.source ?? t('agentAnalysis.source')}
-                      </Badge>
-                      <span className="text-muted-foreground">
+                    <li key={i} className="flex flex-col gap-1 text-sm">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        {e.media_title && (
+                          <Badge variant="secondary" className="shrink-0 text-xs gap-1">
+                            <Film className="h-3 w-3" /> {e.media_title}
+                          </Badge>
+                        )}
+                        {e.source_type && (
+                          <Badge variant="outline" className="shrink-0 text-xs">{e.source_type}</Badge>
+                        )}
+                      </span>
+                      <span className="text-muted-foreground pl-1">
                         {e.content ?? JSON.stringify(e)}
-                        {typeof e.timestamp_ms === 'number' && (
-                          <span className="ml-2 text-xs">· {t('agentAnalysis.timestamp', { timestamp: (e.timestamp_ms / 1000).toFixed(1) })}</span>
+                        {(typeof e.start_ms === 'number' || typeof e.end_ms === 'number') && (
+                          <span className="ml-2 text-xs">
+                            · {e.start_ms != null ? (e.start_ms / 1000).toFixed(1) : '—'}
+                            –{e.end_ms != null ? (e.end_ms / 1000).toFixed(1) : '—'}s
+                          </span>
                         )}
                       </span>
                     </li>

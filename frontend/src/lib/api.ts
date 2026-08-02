@@ -111,7 +111,7 @@ export const videoApi = {
 
 // Analysis endpoints
 export const analysisApi = {
-  create: (data: { goal: string; media_id: string; user_id: string; max_rounds?: number }): ApiResponse<{
+  create: (data: { goal: string; media_ids: string[]; user_id: string; max_rounds?: number }): ApiResponse<{
     task_id: string
     status: string
     goal: string

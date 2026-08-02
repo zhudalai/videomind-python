@@ -152,12 +152,15 @@
   },
   "agentAnalysis": {
     "title": "Agent Deep Analysis",
-    "subtitle": "Goal-driven multi-round analysis: Planner → Executor → Critic, up to 2 rounds闭环",
+    "subtitle": "Goal-driven multi-round analysis: Planner → Executor → Critic, up to 2 rounds",
     "analysisGoal": "Analysis Goal",
     "goalPlaceholder": "e.g., Analyze the business model discussed in this video, summarize the main arguments and supporting evidence",
     "goalCounter": "{count} / 5000",
-    "targetVideo": "Target Video",
-    "selectVideo": "— Select Video —",
+    "videoSources": "Video Sources",
+    "videoSourcesCount": "{count} video source(s)",
+    "selectAtLeastOne": "Select at least 1 video",
+    "expandVideoSources": "Expand video sources",
+    "collapseVideoSources": "Collapse video sources",
     "noVideosForAnalysis": "No videos available for analysis, please upload first",
     "maxRounds": "Max Rounds",
     "oneRound": "1 round (no retry)",
@@ -186,7 +189,11 @@
     "suggestions": "Suggestions",
     "confidence": "Confidence {pct}%",
     "source": "{source}",
-    "timestamp": "{timestamp}s"
+    "timestamp": "{timestamp}s",
+    "devIdentityHint": "Dev identity not ready (no user config); cannot submit",
+    "criticFeedback": "Critic feedback",
+    "costPending": "cost pending",
+    "maxVideosReached": "Maximum 2 videos allowed"
   },
   "pipeline": {
     "title": "Processing Pipeline",

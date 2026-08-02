@@ -3,8 +3,8 @@
 对应 docs/TASK-ORCHESTRATION.md Celery 配置 + docs/VIDEO-PIPELINE.md 管线任务。
 设计要点：
 1. 两个队列：
-   - `gpu`：GPU 密集型任务（ASR/OCR/Embedding），concurrency=1，单卡串行
-   - `cpu`：CPU 密集型任务（下载/转码/索引），concurrency=4，可横向扩容
+   - `gpu`：GPU 密集型任务（ASR/OCR/**Embedding/索引**），concurrency=1，单卡串行
+   - `cpu`：CPU 密集型任务（下载/转码），concurrency=4，可横向扩容
 2. 结果后端 Redis DB2，Broker Redis DB1（避免与缓存 DB0 争用）。
 3. 任务路由：`task_routes` 自动按 queue 分发。
 """
@@ -61,7 +61,7 @@ celery_app.conf.update(
             "queue": "gpu"
         },
         "videomind.tasks.index_task": {
-            "queue": "cpu"
+            "queue": "gpu"
         },
         "videomind.tasks.pipeline_task": {
             "queue": "cpu"

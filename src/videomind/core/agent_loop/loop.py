@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.agent_loop.types import AgentState, AnalysisResult
 
@@ -28,11 +29,12 @@ class AgentLoop:
         self._executor = executor
         self._critic = critic
 
-    async def run(self, goal: str, max_rounds: int = 2) -> AnalysisResult:
+    async def run(self, goal: str, db: AsyncSession, max_rounds: int = 2) -> AnalysisResult:
         """执行分析主循环。
 
         Args:
             goal: 用户分析目标
+            db: 数据库会话，用于 LLM 计费记录
             max_rounds: 最大循环轮数，默认 2
 
         Returns:
@@ -42,9 +44,9 @@ class AgentLoop:
 
         for round_num in range(1, max_rounds + 1):
             state.round = round_num
-            state.plan = await self._planner.plan(state)
-            state.result = await self._executor.execute(state)
-            state.critique = await self._critic.critique(state)
+            state.plan = await self._planner.plan(state, db)
+            state.result = await self._executor.execute(state, db)
+            state.critique = await self._critic.critique(state, db)
 
             if state.critique.passed:
                 break

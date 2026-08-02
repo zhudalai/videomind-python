@@ -9,11 +9,20 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.agent_loop.types import AgentState, CriticResult
 from videomind.core.agent_loop.verifier import EvidenceVerifier
+from videomind.core.model_gateway.types import ChatRequest
+
+if TYPE_CHECKING:
+    from typing import Protocol
+
+    class LLMProtocol(Protocol):
+        async def chat(self, request: Any, db: AsyncSession) -> Any: ...
 
 logger = structlog.get_logger(__name__)
 
@@ -51,11 +60,12 @@ class Critic:
         self._llm = llm
         self._verifier = verifier
 
-    async def critique(self, state: AgentState) -> CriticResult:
+    async def critique(self, state: AgentState, db: AsyncSession) -> CriticResult:
         """对分析结果进行评审。
 
         Args:
             state: 当前代理状态，必须包含 result
+            db: 数据库会话，用于 LLM 计费记录
 
         Returns:
             CriticResult: 评审结果
@@ -86,7 +96,11 @@ class Critic:
                 suggestions=json.dumps(suggestion_summaries, ensure_ascii=False),
             )
 
-            resp = await self._llm.chat(prompt)
+            chat_req = ChatRequest(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+            )
+            resp = await self._llm.chat(chat_req, db)
             data = json.loads(resp.content)
         except Exception:
             logger.warning("Critic LLM 调用失败", exc_info=True)

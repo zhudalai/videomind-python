@@ -24,8 +24,8 @@ class TestDatabaseConnection:
             )
         )
         count = result.scalar_one()
-        # 核心 18 表 + 扩展 4 表 + user_config 1 + alembic_version = 24
-        assert count == 24, f"期望 24 张表，实际 {count}"
+        # 核心 18 表 + 扩展 4 表 + user_config 1 + analysis_task_media 1 + alembic_version = 25
+        assert count == 25, f"期望 25 张表，实际 {count}"
 
 
 @pytest.mark.infra

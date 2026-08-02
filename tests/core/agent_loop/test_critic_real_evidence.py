@@ -6,6 +6,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 from videomind.core.agent_loop.types import (
     AgentState, AnalysisResult, Conclusion, Evidence,
 )
@@ -33,7 +34,8 @@ async def test_critic_hard_pass_when_all_hits_real() -> None:
             conclusions=[Conclusion(point="p", evidence_ids=["EID_a1"], confidence=0.8)]),
     )
     critic = Critic(_llm(True), EvidenceVerifier())
-    r = await critic.critique(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    r = await critic.critique(state, mock_db)
     assert r.passed is True and r.evidence_verified is True
 
 
@@ -49,7 +51,8 @@ async def test_critic_hard_fails_when_conclusion_cites_fake_eid() -> None:
             conclusions=[Conclusion(point="p", evidence_ids=["EID_FAKE_99"])]),
     )
     critic = Critic(_llm(True), EvidenceVerifier())  # LLM 说过，但硬校验应拦
-    r = await critic.critique(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    r = await critic.critique(state, mock_db)
     assert r.passed is False and r.evidence_verified is False
 
 
@@ -63,5 +66,6 @@ async def test_critic_llm_fail_short_circuits() -> None:
             evidence=[Evidence(id="EID_a1")],
             conclusions=[Conclusion(point="p", evidence_ids=["EID_a1"])]))
     critic = Critic(_llm(False), EvidenceVerifier())
-    r = await critic.critique(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    r = await critic.critique(state, mock_db)
     assert r.passed is False

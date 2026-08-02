@@ -35,7 +35,7 @@ test.describe('L1 smoke — 5 页加载 + 真实 fetch', () => {
     await expect(page.getByRole('heading', { name: 'Agent 深度分析' })).toBeVisible()
     // CardTitle h3 锚定「分析目标」；label 形式「目标视频」用精确文本（避开 CardDescription 同串）
     await expect(page.getByRole('heading', { name: '分析目标' })).toBeVisible()
-    await expect(page.getByText('目标视频', { exact: true })).toBeVisible()
+    await expect(page.getByText('视频源列表', { exact: true })).toBeVisible()
   })
 
   test('健康监控页渲染四个组件卡 + 时间线区块', async ({ page }) => {

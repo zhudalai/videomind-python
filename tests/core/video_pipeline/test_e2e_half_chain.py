@@ -84,7 +84,7 @@ class TestE2EHalfChain:
 
             # 5. Embedding（为 chunks 生成向量）
             embedder = get_embedding_backend()
-            chunk_texts = [c.content for c in chunk_orms]
+            chunk_texts = [c.text for c in chunk_orms]
             if chunk_texts:
                 embed_result = await embedder.embed(chunk_texts)
                 # 回填向量到 chunk ORM（indexer 会用到）
@@ -114,8 +114,8 @@ class TestE2EHalfChain:
                     ids=[str(index_result.first_chunk_id)],
                 )
                 assert len(point) == 1
-                assert point[0].payload["media_id"] == str(media_id)
-                assert point[0].payload["content"] is not None
+                assert point[0]["payload"]["media_id"] == str(media_id)
+                assert point[0]["payload"]["content"] is not None
 
             # 9. 验证 PG chunk 表
             from sqlalchemy import select
@@ -138,15 +138,14 @@ class TestE2EHalfChain:
             if chunk_texts:
                 query_vec = (await embedder.embed(["视频内容检索"])).vectors[0]
                 hits = await qdrant.search(
-                    collection_name=qdrant._collection,
                     query_vector=query_vec,
                     limit=5,
-                    with_payload=True,
+                    filters={"media_id": str(media_id)},
                 )
                 # 至少命中自己写入的
                 assert len(hits) >= 1
                 for h in hits:
-                    assert h.payload["media_id"] == str(media_id)
+                    assert h["payload"]["media_id"] == str(media_id)
 
         finally:
             s.minio_bucket = original_bucket

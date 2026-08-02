@@ -7,21 +7,28 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.agent_loop.types import (
     AgentState, AnalysisResult, Conclusion, Evidence,
 )
+from videomind.core.model_gateway.types import ChatRequest
 
 if TYPE_CHECKING:
     from typing import Protocol
 
     class LLMProtocol(Protocol):
-        async def chat(self, request: Any) -> Any: ...
+        async def chat(self, request: Any, db: AsyncSession) -> Any: ...
 
     class RetrieverProtocol(Protocol):
         """检索器最小接口：单视频查询返回命中原始片段 dict 列表."""
 
         async def search(self, query: str, media_id: uuid.UUID, *, top_k: int) -> list[dict]: ...
+
+    class ChatRequestProtocol(Protocol):
+        """LLM 聊天请求最小接口（避免动态类型创建）."""
+        messages: list[dict[str, str]]
+        temperature: float
 
 logger = structlog.get_logger(__name__)
 TOP_K_PER_VIDEO = 5
@@ -57,7 +64,7 @@ class Executor:
         self._llm = llm
         self._retriever = retriever if retriever is not None else _RagRetriever()
 
-    async def execute(self, state: AgentState) -> AnalysisResult:
+    async def execute(self, state: AgentState, db: AsyncSession) -> AnalysisResult:
         plan = state.plan
         if plan is None:
             logger.info("Executor 收到空 plan，返回空 AnalysisResult")
@@ -74,7 +81,12 @@ class Executor:
             round_hits: list[Evidence] = []
             for mid in state.media_ids:
                 try:
-                    hits = await self._retriever.search(query, uuid.UUID(mid), top_k=TOP_K_PER_VIDEO)
+                    mid_uuid = uuid.UUID(mid)
+                except ValueError:
+                    logger.warning("Executor 跳过无效 UUID", mid=mid)
+                    continue
+                try:
+                    hits = await self._retriever.search(query, mid_uuid, top_k=TOP_K_PER_VIDEO)
                 except Exception:
                     logger.warning("Executor 检索失败 media=%s", mid, exc_info=True)
                     continue
@@ -98,13 +110,17 @@ class Executor:
             )
             prompt = self._build_prompt(task, context_block)
             try:
-                resp = await self._llm.chat(
-                    type("ChatRequest", (), {
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1,
-                    })()
+                chat_req = ChatRequest(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
                 )
-                data = json.loads(resp.content)
+                resp = await self._llm.chat(chat_req, db)
+
+                try:
+                    data = json.loads(resp.content)
+                except json.JSONDecodeError:
+                    logger.warning("Executor LLM 返回非 JSON，跳过 task=%s", task.id)
+                    continue
             except Exception:
                 logger.warning("Executor LLM 失败 task=%s", task.id, exc_info=True)
                 continue
@@ -138,10 +154,13 @@ class Executor:
 
     @staticmethod
     def _build_prompt(task: Any, context_block: str) -> str:
+        # Sanitize user-controlled content to reduce prompt injection risk
+        safe_description = task.description.replace("{", "{{").replace("}", "}}")
+        safe_context = context_block.replace("{", "{{").replace("}", "}}")
         return (
             "你只能基于以下真实检索到的证据回答，严禁编造新的证据 ID。\n"
-            f"子任务：{task.description}\n\n"
-            f"证据上下文：\n{context_block or '(无命中证据)'}\n\n"
+            f"子任务：{safe_description}\n\n"
+            f"证据上下文：\n{safe_context or '(无命中证据)'}\n\n"
             '返回 JSON：{"title": "...", '
             '"conclusions": [{"point": "...", "evidence_ids": ["EID_..."], "confidence": 0.0}], '
             '"suggestions": ["..."]}'

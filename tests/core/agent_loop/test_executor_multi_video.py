@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from unittest.mock import AsyncMock
-from uuid import UUID
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 UUID_A = "00000000-0000-0000-0000-000000000001"
 UUID_B = "00000000-0000-0000-0000-000000000002"
@@ -47,7 +47,8 @@ async def test_executor_cross_video_retrieval_tags_media_title() -> None:
     ])
     executor = Executor(mock_llm, retriever=mock_retriever)
     state = _state([UUID_A, UUID_B], [(UUID_A, "a.mp4"), (UUID_B, "b.mp4")], 1)
-    result = await executor.execute(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await executor.execute(state, mock_db)
 
     assert len(result.evidence) == 2
     assert {e.media_title for e in result.evidence} == {"a.mp4", "b.mp4"}
@@ -73,7 +74,8 @@ async def test_executor_filters_hallucinated_eids() -> None:
     mock_retriever.search = AsyncMock(return_value=[_hit("EID_a1", "a1")])
     executor = Executor(mock_llm, retriever=mock_retriever)
     state = _state([UUID_A], [(UUID_A, "a.mp4")], 1)
-    result = await executor.execute(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await executor.execute(state, mock_db)
 
     assert len(result.conclusions) == 1
     assert result.conclusions[0].point == "real"
@@ -89,7 +91,8 @@ async def test_executor_zero_hits_does_not_crash() -> None:
     # chat 不设 return_value -> MagicMock -> json.loads 抛错 -> continue
     executor._llm = AsyncMock(); executor._llm.chat = AsyncMock()
     state = _state([UUID_A], [(UUID_A, "a.mp4")], 1)
-    result = await executor.execute(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await executor.execute(state, mock_db)
 
     assert len(result.evidence) == 0
     assert len(result.conclusions) == 0

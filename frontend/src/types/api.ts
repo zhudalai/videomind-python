@@ -180,9 +180,9 @@ export type TranscriptionResponse = z.infer<typeof TranscriptionResponseSchema>
 // Analysis Task
 export const AnalysisTaskRequestSchema = z.object({
   goal: z.string().min(1).max(5000),
-  media_id: z.string().uuid(),
+  media_ids: z.array(z.string().uuid()).min(1),
   user_id: z.string().uuid(),
-  max_rounds: z.number().int().min(1).max(5).default(2),
+  max_rounds: z.number().int().min(1).max(2).default(2),
 })
 export type AnalysisTaskRequest = z.infer<typeof AnalysisTaskRequestSchema>
 

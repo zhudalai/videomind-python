@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.agent_loop.types import (
     AgentPlan,
@@ -43,7 +44,8 @@ async def test_agent_loop_single_round_passes() -> None:
     ))
 
     loop = AgentLoop(mock_planner, mock_executor, mock_critic)
-    result = await loop.run("分析视频")
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await loop.run("分析视频", mock_db)
 
     assert result.title == "OK"
     assert len(result.conclusions) == 1
@@ -75,7 +77,8 @@ async def test_agent_loop_two_rounds_max() -> None:
     ])
 
     loop = AgentLoop(mock_planner, mock_executor, mock_critic)
-    result = await loop.run("goal")
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await loop.run("goal", mock_db)
 
     assert result.title == "Final"
     assert mock_planner.plan.call_count == 2
@@ -111,7 +114,8 @@ async def test_agent_loop_respects_max_rounds_one() -> None:
         passed=False, feedback="no", coverage_score=0.3))
 
     loop = AgentLoop(mock_planner, mock_executor, mock_critic)
-    await loop.run("goal", max_rounds=1)
+    mock_db = AsyncMock(spec=AsyncSession)
+    await loop.run("goal", mock_db, max_rounds=1)
 
     assert mock_planner.plan.call_count == 1
     assert mock_critic.critique.call_count == 1

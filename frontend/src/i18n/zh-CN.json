@@ -156,8 +156,11 @@
     "analysisGoal": "分析目标",
     "goalPlaceholder": "例如：分析这个视频讲解的商业模式，总结核心论点与支撑证据",
     "goalCounter": "{count} / 5000",
-    "targetVideo": "目标视频",
-    "selectVideo": "— 选择视频 —",
+    "videoSources": "视频源列表",
+    "videoSourcesCount": "{count} 个视频源",
+    "selectAtLeastOne": "请至少选择 1 个视频",
+    "expandVideoSources": "展开视频源",
+    "collapseVideoSources": "收起视频源",
     "noVideosForAnalysis": "暂无可分析视频，请先上传",
     "maxRounds": "最大轮数",
     "oneRound": "1 轮（不重试）",
@@ -186,7 +189,11 @@
     "suggestions": "建议",
     "confidence": "置信度 {pct}%",
     "source": "{source}",
-    "timestamp": "{timestamp}s"
+    "timestamp": "{timestamp}s",
+    "devIdentityHint": "Dev 身份未就绪（未取到 user config），暂不可提交",
+    "criticFeedback": "评审反馈",
+    "costPending": "费用待核算",
+    "maxVideosReached": "最多选择 2 个视频"
   },
   "pipeline": {
     "title": "处理进度",

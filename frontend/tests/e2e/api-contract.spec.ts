@@ -76,7 +76,7 @@ test.describe('L2 api-contract — 10 端点契约', () => {
   // ── agent：error 路径全可跑 ──
   test('POST /api/agent/analyze 不存在 media → 404', async ({ request }) => {
     const r = await request.post(`${BACKEND}/api/agent/analyze`, {
-      data: { goal: 'contract-ghost-media', media_id: GHOST_UUID, user_id: GHOST_UUID, max_rounds: 1 },
+      data: { goal: 'contract-ghost-media', media_ids: [GHOST_UUID], user_id: GHOST_UUID, max_rounds: 1 },
     })
     expect(r.status()).toBe(404)
   })
@@ -127,7 +127,7 @@ test.describe('L2 api-contract — 10 端点契约', () => {
     const r = await request.post(`${BACKEND}/api/agent/analyze`, {
       data: {
         goal: `e2e-contract-analyze-${Date.now()}`,
-        media_id: mediaId,
+        media_ids: [mediaId],
         user_id: user.user_id,
         max_rounds: 1,
       },

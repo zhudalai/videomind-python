@@ -6,6 +6,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.agent_loop.types import AgentState, AnalysisResult
 
@@ -32,7 +33,8 @@ async def test_critic_passes_with_perfect_result() -> None:
             evidence=[Evidence(id="EID_real", chunk_id="c1", content="x")],
             conclusions=[Conclusion(point="ok", evidence_ids=["EID_real"])]),
     )
-    result = await critic.critique(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await critic.critique(state, mock_db)
     assert result.passed is True
     assert result.coverage_score == 0.95
     assert result.evidence_verified is True
@@ -61,7 +63,8 @@ async def test_critic_fails_with_low_coverage() -> None:
         goal="分析",
         result=AnalysisResult(title="T"),
     )
-    result = await critic.critique(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await critic.critique(state, mock_db)
 
     assert result.passed is False
     assert result.required_timestamps == [12000]
@@ -81,7 +84,8 @@ async def test_critic_LLM_error_graceful() -> None:
         goal="test",
         result=AnalysisResult(title="T"),
     )
-    result = await critic.critique(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await critic.critique(state, mock_db)
 
     # LLM 失败不应抛异常，返回默认失败结果
     assert result.passed is False

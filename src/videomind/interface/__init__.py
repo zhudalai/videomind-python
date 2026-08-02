@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import sys
+print(f"[INIT] loading videomind.interface from {__file__}", file=sys.stderr)
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -72,3 +75,13 @@ app.include_router(sse_router, prefix="/api")
 app.include_router(agent_router, prefix="/api")
 app.include_router(rag_router, prefix="/api")
 app.include_router(user_router, prefix="/api")
+
+# ── Disable OpenAPI schema caching (dev reload needs fresh schema) ──
+def _custom_openapi():
+    from fastapi.openapi.utils import get_openapi
+    return get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+app.openapi = _custom_openapi

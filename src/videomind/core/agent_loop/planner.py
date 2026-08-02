@@ -6,8 +6,10 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.agent_loop.types import AgentPlan, AgentState, SubTask
+from videomind.core.model_gateway.types import ChatRequest
 
 if TYPE_CHECKING:
     from typing import Protocol
@@ -15,7 +17,7 @@ if TYPE_CHECKING:
     class LLMProtocol(Protocol):
         """:class:`Planner` 所需的 LLM 最小接口."""
 
-        async def chat(self, request: Any) -> Any: ...
+        async def chat(self, request: Any, db: AsyncSession) -> Any: ...
 
 logger = structlog.get_logger(__name__)
 
@@ -24,8 +26,15 @@ SYSTEM_PROMPT = (
     "每个子任务需指定所需证据类型（frame / text / audio / sql）。"
     "如涉及特定时间段，提供 time_range（毫秒）起止值。"
     "每个子任务还需提供 search_query：面向检索的关键词（如\"商业模式 价格 斜率\"），"
-    "而非完整问句——它将直接送入向量检索。"
-    "输出 JSON 格式："
+    "而非完整问句——它将直接送入向量检索。\n\n"
+    "【多视频对比任务强制要求】：\n"
+    "1. 任务拆解必须包含三阶段：\n"
+    "   - 阶段 A（单视频画像）：为每个视频单独建立核心观点、论证结构、关键案例画像\n"
+    "   - 阶段 B（证据层对齐）：按共同议题/实体/概念检索双方表述，定位分歧与共识\n"
+    "   - 阶段 C（维度对比输出）：按「核心主题、论证路径、案例风格、实用策略、隐含前提」等维度并列对比\n"
+    "2. 最终产出的 conclusions 必须显式标注归属视频（video_id），禁止出现无归属的泛化结论\n"
+    "3. 输出结构建议：task 1-N 分别对应每视频独立理解，task N+1 起为跨视频对比检索\n\n"
+    "输出 JSON 格式：\n"
     '{"tasks": [{"description": "...", "evidence_type": "...", '
     '"time_range": [start_ms, end_ms], "search_query": "..."}], "reasoning": "..."}'
 )
@@ -48,11 +57,12 @@ class Planner:
         """
         self._llm = llm
 
-    async def plan(self, state: AgentState) -> AgentPlan:
+    async def plan(self, state: AgentState, db: AsyncSession) -> AgentPlan:
         """根据 AgentState.goal 生成执行计划。
 
         Args:
             state: 当前代理状态（主要使用 ``goal`` 字段）。
+            db: 数据库会话，用于 LLM 计费记录。
 
         Returns:
             包含最多 ``MAX_TASKS``（5）个子任务的 AgentPlan。
@@ -64,13 +74,13 @@ class Planner:
             if video_names else "\n可用视频：未提供"
         )
         prompt = f"{SYSTEM_PROMPT}\n\n用户目标：{state.goal}{video_section}"
-        request = type("ChatRequest", (), {
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        })()
+        request = ChatRequest(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
 
         try:
-            resp = await self._llm.chat(request)
+            resp = await self._llm.chat(request, db)
             data = json.loads(resp.content)
         except Exception:
             logger.warning("Planner 调用 LLM 或 JSON 解析失败", exc_info=True)

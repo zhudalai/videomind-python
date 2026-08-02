@@ -94,10 +94,10 @@ async def search(
     reranker = DeterministicReranker()
     reranked: list[VectorHit] = reranker.rerank(expanded)
 
-    # 5. 分配 evidence_id
+    # 5. 分配 evidence_id（应用 top_k 限制）
     evidence_list: list[Evidence] = []
     context_list: list[str] = []
-    for i, hit in enumerate(reranked):
+    for i, hit in enumerate(reranked[:top_k]):
         eid = make_evidence_id(uuid.UUID(hit.chunk_id), i)
         evidence_list.append(
             Evidence(
@@ -131,7 +131,7 @@ async def search(
     return {
         "context": context_list,
         "evidence": evidence_list,
-        "raw_hits": raw_hits,
+        "raw_hits": raw_hits[:top_k],
     }
 
 

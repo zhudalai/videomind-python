@@ -23,8 +23,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.infrastructure.storage import models as m
@@ -41,9 +42,16 @@ class AnalyzeRequest(BaseModel):
 
     goal: str = Field(..., min_length=1, max_length=5000, description="分析目标")
     media_ids: list[uuid.UUID] = Field(
-        ..., min_length=1, max_length=20, description="目标视频列表（≥1，≤20）")
+        ..., min_length=1, max_length=2, description="目标视频列表（≥1，≤2）")
     user_id: uuid.UUID = Field(..., description="发起用户 ID（auth 实现前由前端传入）")
     max_rounds: int = Field(2, ge=1, le=2, description="最大轮数；上限 2")
+
+    @field_validator("media_ids", mode="after")
+    @classmethod
+    def _unique_media_ids(cls, v: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(set(v)) != len(v):
+            raise ValueError("media_ids must not contain duplicates")
+        return v
 
 
 class AnalyzeResponse(BaseModel):
@@ -128,13 +136,31 @@ async def analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks) -> Ana
                 max_rounds=req.max_rounds,
             )
             session.add(task)
-            await session.commit()
-            await session.refresh(task)
-            # 关联表：每条 media 一行，position=index
-            for pos, mid in enumerate(req.media_ids):
-                session.add(m.AnalysisTaskMedia(
-                    task_id=task.id, media_id=mid, position=pos))
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                # 并发创建：重新查询已存在的任务
+                existing = await session.execute(
+                    select(m.AnalysisTask)
+                    .where(
+                        m.AnalysisTask.media_ids_hash == media_ids_hash,
+                        m.AnalysisTask.goal_hash == goal_hash,
+                        m.AnalysisTask.status.notin_(["failed"]),
+                    )
+                    .order_by(m.AnalysisTask.created_at.desc())
+                    .limit(1)
+                )
+                task = existing.scalar_one_or_none()
+                if task is None:
+                    raise HTTPException(status_code=500, detail="race condition: task creation failed")
+            else:
+                await session.refresh(task)
+                # 关联表：每条 media 一行，position=index
+                for pos, mid in enumerate(req.media_ids):
+                    session.add(m.AnalysisTaskMedia(
+                        task_id=task.id, media_id=mid, position=pos))
+                await session.commit()
 
         # 仅新任务才调度后台运行
         if task.status == "pending":
@@ -224,12 +250,13 @@ async def _load_video_meta(media_ids: list[uuid.UUID]) -> list[Any]:
 
     meta: list[VideoMeta] = []
     async with AsyncSessionLocal() as session:
-        for mid in media_ids:
-            media = await session.get(m.MediaFile, mid)
-            if media:
-                meta.append(VideoMeta(
-                    media_id=str(mid), filename=media.filename,
-                    duration_ms=media.duration_ms))
+        result = await session.execute(
+            select(m.MediaFile).where(m.MediaFile.id.in_(media_ids))
+        )
+        for media in result.scalars().all():
+            meta.append(VideoMeta(
+                media_id=str(media.id), filename=media.filename,
+                duration_ms=media.duration_ms))
     return meta
 
 
@@ -265,33 +292,36 @@ async def _run_agent_loop(
             video_meta=video_meta,
         )
 
-        for round_num in range(1, max_rounds + 1):
-            state.round = round_num
-            async with AsyncSessionLocal() as session:
+        # 使用单一数据库会话贯穿整个 AgentLoop
+        async with AsyncSessionLocal() as session:
+            for round_num in range(1, max_rounds + 1):
+                state.round = round_num
                 t = await session.get(m.AnalysisTask, task_id)
                 if t:
-                    t.status = "planning"; t.current_round = round_num
+                    t.status = "planning"
+                    t.current_round = round_num
                     await session.commit()
-            state.plan = await loop._planner.plan(state)
-            await _checkpoint(task_id, round_num, "planning", state)
+                state.plan = await loop._planner.plan(state, session)
+                await _checkpoint(task_id, round_num, "planning", state)
 
-            async with AsyncSessionLocal() as session:
                 t = await session.get(m.AnalysisTask, task_id)
-                if t: t.status = "executing"; await session.commit()
-            state.result = await loop._executor.execute(state)
-            await _checkpoint(task_id, round_num, "executing", state)
+                if t:
+                    t.status = "executing"
+                    await session.commit()
+                state.result = await loop._executor.execute(state, session)
+                await _checkpoint(task_id, round_num, "executing", state)
 
-            async with AsyncSessionLocal() as session:
                 t = await session.get(m.AnalysisTask, task_id)
-                if t: t.status = "critic_check"; await session.commit()
-            state.critique = await loop._critic.critique(state)
-            await _checkpoint(task_id, round_num, "critic_check", state)
+                if t:
+                    t.status = "critic_check"
+                    await session.commit()
+                state.critique = await loop._critic.critique(state, session)
+                await _checkpoint(task_id, round_num, "critic_check", state)
 
-            if state.critique.passed:
-                break
+                if state.critique.passed:
+                    break
 
-        result = state.result
-        async with AsyncSessionLocal() as session:
+            result = state.result
             t = await session.get(m.AnalysisTask, task_id)
             assert t is not None
             if result and result.title:

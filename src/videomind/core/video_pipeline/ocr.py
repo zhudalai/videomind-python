@@ -102,55 +102,69 @@ class OCREngine:
             self._local_model = await anyio.to_thread.run_sync(_load_model)
 
         minio = get_minio_client()
-        results: list[OCRResult] = []
-        seen_phashes: set[str] = set()
-        phash_lock = asyncio.Lock()
 
-        async def _process_one(key: str) -> OCRResult:
-            # 1) 下载帧到本地临时（每个下载用唯一路径，避免 Windows 文件锁冲突）
+        # 1) 先串行下载所有帧并计算 phash（去重检测需按顺序确定性）
+        # 这样保证第一帧总是做 OCR，后续重复帧直接标记 duplicate
+        frame_data: list[tuple[str, Path, str]] = []  # (key, local_path, phash)
+        seen_phashes: set[str] = set()
+        is_duplicate: list[bool] = []
+
+        for key in frame_keys:
             import uuid as _uuid
             local = Path(tempfile.gettempdir()) / f"ocr_{media_id}_{_uuid.uuid4().hex}_{Path(key).name}"
             await minio.download_file(key, local)
+            phash = await _compute_phash(local)
+            frame_data.append((key, local, phash))
 
-            try:
-                # 2) 计算 phash（去重） - 使用锁保证 check-and-add 原子性
-                phash = await _compute_phash(local)
-                print(f"DEBUG OCR: key={key}, phash={phash}, seen_phashes={seen_phashes}")
-                async with phash_lock:
-                    print(f"DEBUG OCR: acquired lock, checking phash={phash} in seen_phashes={seen_phashes}")
-                    if phash in seen_phashes:
-                        # 重复帧：复用上一帧结果
-                        print(f"DEBUG OCR: DUPLICATE DETECTED for key={key}")
-                        return OCRResult(
-                            frame_ms=_frame_ms_from_key(key),
-                            minio_object=key,
-                            ocr_text="[duplicate frame]",
-                            phash=phash,
-                            model_name="paddle-ocr",
-                        )
-                    seen_phashes.add(phash)
-                    print(f"DEBUG OCR: added phash={phash} to seen_phashes={seen_phashes}")
+            if phash in seen_phashes:
+                is_duplicate.append(True)
+            else:
+                seen_phashes.add(phash)
+                is_duplicate.append(False)
 
-                # 3) OCR 识别（PaddleOCR 3.x 用 predict() 替代 ocr()，cls 不再作为参数）
+        # 2) 并行 OCR 处理（仅对非重复帧）
+        semaphore = asyncio.Semaphore(2 if self._use_gpu else 4)
+
+        async def _ocr_one(idx: int) -> OCRResult:
+            key, local, phash = frame_data[idx]
+            if is_duplicate[idx]:
+                # 重复帧：直接返回标记
+                try:
+                    local.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return OCRResult(
+                    frame_ms=_frame_ms_from_key(key),
+                    minio_object=key,
+                    ocr_text="[duplicate frame]",
+                    phash=phash,
+                    model_name="paddle-ocr",
+                )
+
+            # 非重复帧：执行 OCR
+            async with semaphore:
                 def _ocr() -> list:
-                    # PaddleOCR 3.x: predict() 返回 iterable of Result 对象 (含 rec_texts)
                     try:
                         result = list(self._local_model.predict(str(local)))
                         return result
                     except NotImplementedError as e:
                         if "ConvertPirAttribute2RuntimeAttribute" in str(e) or "onednn" in str(e).lower():
-                            # PaddlePaddle CPU + oneDNN PIR bug：返回空结果，不崩溃
                             return []
                         raise
                     except Exception as e:
-                        # 其他异常也兜底返回空，保证管线不阻塞
                         import logging
                         logging.warning(f"OCR 识别异常，降级为空: {e}")
                         return []
 
-                ocr_raw = await anyio.to_thread.run_sync(_ocr)
-                texts = _extract_texts(ocr_raw)
-                ocr_text = "\n".join(texts) if texts else None
+                try:
+                    ocr_raw = await anyio.to_thread.run_sync(_ocr)
+                    texts = _extract_texts(ocr_raw)
+                    ocr_text = "\n".join(texts) if texts else None
+                finally:
+                    try:
+                        local.unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
                 return OCRResult(
                     frame_ms=_frame_ms_from_key(key),
@@ -159,19 +173,10 @@ class OCREngine:
                     phash=phash,
                     model_name="paddle-ocr",
                 )
-            finally:
-                # 清理临时文件
-                try:
-                    local.unlink(missing_ok=True)
-                except Exception:
-                    pass
 
-        # 并行处理（但 PaddleOCR 内部可能已占 GPU，这里限制并发）
-        semaphore = asyncio.Semaphore(2 if self._use_gpu else 4)
-
-        async def _limited(key: str) -> OCRResult:
-            async with semaphore:
-                return await _process_one(key)
+        # 3) 并行执行，保持原始顺序
+        results = await asyncio.gather(*[_ocr_one(i) for i in range(len(frame_keys))])
+        return results
 
         results = await asyncio.gather(*[_limited(k) for k in frame_keys])
         return results

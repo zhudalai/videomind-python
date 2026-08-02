@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -7,6 +7,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./tests/setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    exclude: ['node_modules/**', '**/tests/e2e/**', '**/test-*.spec.ts'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -16,21 +22,6 @@ export default defineConfig({
       '@/lib': path.resolve(__dirname, './src/lib'),
       '@/store': path.resolve(__dirname, './src/store'),
       '@/types': path.resolve(__dirname, './src/types'),
-    },
-  },
-  server: {
-    port: 4000,
-    strictPort: true,
-    host: '127.0.0.1',
-    proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:8002',
-        changeOrigin: true,
-      },
-      '/sse': {
-        target: 'http://127.0.0.1:8002',
-        changeOrigin: true,
-      },
     },
   },
 })

@@ -6,6 +6,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
@@ -36,9 +37,10 @@ async def test_executor_generates_analysis_result() -> None:
         media_ids=[MID],
         video_meta=[VideoMeta(media_id=MID, filename="a.mp4")],
         plan=AgentPlan(tasks=[SubTask(id="task_1", description="提取主题",
-                                      required_evidence_type="text")], reasoning="一个任务"),
+                                          required_evidence_type="text")], reasoning="一个任务"),
     )
-    result = await executor.execute(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await executor.execute(state, mock_db)
 
     assert result.title == "视频分析结果"
     assert len(result.conclusions) == 2
@@ -73,7 +75,8 @@ async def test_executor_dedup_suggestions() -> None:
             SubTask(id="task2", description="t2", required_evidence_type="text"),
         ], reasoning=""),
     )
-    result = await executor.execute(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await executor.execute(state, mock_db)
 
     # 去重: A, B, C -> 3 条
     assert len(result.suggestions) == 3
@@ -94,7 +97,8 @@ async def test_executor_malformed_json_graceful() -> None:
         goal="test",
         plan=AgentPlan(tasks=[SubTask(id="t1", description="t1", required_evidence_type="text")], reasoning=""),
     )
-    result = await executor.execute(state)
+    mock_db = AsyncMock(spec=AsyncSession)
+    result = await executor.execute(state, mock_db)
 
     # 优雅降级，不抛异常
     assert len(result.conclusions) == 0
