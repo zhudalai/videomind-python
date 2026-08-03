@@ -28,7 +28,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -296,8 +296,16 @@ class MediaFileResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+    thumbnail_object: str | None = None
+    meta_json: dict | None = Field(default=None, exclude=True, repr=False)
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def title(self) -> str | None:
+        # yt-dlp 抓取的视频标题持久化在 meta_json.title；前端卡片优先用它显示
+        return (self.meta_json or {}).get("title")
 
 
 class VideoDetailResponse(BaseModel):
@@ -317,12 +325,20 @@ class VideoDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+    thumbnail_object: str | None = None
     # Related data (loaded when status=ready)
     transcription: "TranscriptionResponse | None" = None
     segments: "SegmentsListResponse | None" = None
     ocr_results: "OcrResultsListResponse | None" = None
+    meta_json: dict | None = Field(default=None, exclude=True, repr=False)
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def title(self) -> str | None:
+        # yt-dlp 抓取的视频标题持久化在 meta_json.title；前端卡片优先用它显示
+        return (self.meta_json or {}).get("title")
 
 
 class TranscriptionResponse(BaseModel):

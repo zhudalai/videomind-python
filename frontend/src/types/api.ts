@@ -77,6 +77,9 @@ export const MediaFileResponseSchema = z.object({
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
   completed_at: z.string().datetime().nullable(),
+  thumbnail_object: z.string().nullable().optional(),
+  // yt-dlp 抓取的视频标题，后端存于 meta_json.title 并作为 computed_field 暴露
+  title: z.string().nullable().optional(),
 })
 export type MediaFileResponse = z.infer<typeof MediaFileResponseSchema>
 

@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
-import { cn, formatRelativeTime, getStatusColor, formatDuration, formatFileSize, extractErrorMessage } from '@/lib/utils'
+import { cn, formatRelativeTime, getStatusColor, formatDuration, formatFileSize, extractErrorMessage, getVideoThumbnailUrl, extractYouTubeVideoId } from '@/lib/utils'
 import {
   Video,
   Search,
@@ -233,6 +233,7 @@ function VideoCard({
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [showMenu, setShowMenu] = useState(false)
+  const [thumbBroken, setThumbBroken] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
   const moreRef = useRef<HTMLDivElement>(null)
 
@@ -247,6 +248,12 @@ function VideoCard({
     return () => document.removeEventListener('mousedown', handler)
   }, [showMenu])
 
+  // Video id 变化时重置失败标记，避免切换数据后一直灰图
+  const videoId = video.id
+  useEffect(() => {
+    setThumbBroken(false)
+  }, [videoId])
+
   const handleClick = () => {
     if (isDeleting) return
     if (!showMenu) navigate(`/videos/${video.id}`)
@@ -254,6 +261,12 @@ function VideoCard({
 
   const statusColor = getStatusColor(video.status)
   const isReady = video.status === 'ready'
+  const thumbUrl = getVideoThumbnailUrl({
+    source_url: video.source_url,
+    thumbnail_object: video.thumbnail_object ?? null,
+    mime_type: video.mime_type,
+  })
+  const showThumb = !!thumbUrl && !thumbBroken
 
   return (
     <Card
@@ -271,7 +284,17 @@ function VideoCard({
       {/* Thumbnail */}
       <div className="aspect-video bg-muted relative overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center">
-          <Video className="h-12 w-12 text-muted-foreground/50" />
+          {!showThumb && <Video className="h-12 w-12 text-muted-foreground/50" />}
+          {showThumb && (
+            <img
+              src={thumbUrl!}
+              alt={displayTitle(video, t)}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 h-full w-full object-cover"
+              onError={() => setThumbBroken(true)}
+            />
+          )}
         </div>
         <div className="absolute top-2 right-2">
           <Badge className={`${statusColor} gap-1`}>
@@ -289,7 +312,7 @@ function VideoCard({
       </div>
 
       <CardContent className="p-4 space-y-3">
-        <h3 className="font-medium line-clamp-1" title={video.filename}>{video.filename}</h3>
+        <h3 className="font-medium line-clamp-1" title={video.filename}>{displayTitle(video)}</h3>
 
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           {video.duration_ms && (
@@ -387,6 +410,31 @@ function VideoCard({
       </CardContent>
     </Card>
   )
+}
+
+/**
+ * 视频卡片标题：优先用后端持久化的 yt-dlp title（meta_json.title，经后端 computed_field 暴露）；
+ * 未落库时（老视频 / 下载中）回退到 YouTube video id 或文件名，保证卡片始终有可读标识。
+ */
+type _T = (k: string, opts?: Record<string, unknown>) => string
+function displayTitle(video: MediaFileResponse, _t?: _T): string {
+  // 后端已落库的真实标题优先
+  const title = (video.title || '').trim()
+  if (title) return title
+
+  const fname = (video.filename || '').trim()
+  // 上传链接（source_url 存在）但无 title：filename 通常是 YouTube 视频 ID 作扩展名 —— 显示成 "YouTube · {id}"
+  if (video.source_url) {
+    const ytId = extractYouTubeVideoId(video.source_url)
+    if (ytId) return `YouTube · ${ytId}`
+    try {
+      const host = new URL(video.source_url).hostname.replace(/^www\./, '')
+      return `${host} · ${fname || video.source_url}`.trim()
+    } catch {
+      return video.source_url
+    }
+  }
+  return fname || '(untitled)'
 }
 
 function VideoCardSkeleton() {

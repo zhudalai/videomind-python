@@ -22,11 +22,11 @@ export default defineConfig({
         host: '127.0.0.1',
         proxy: {
             '/api': {
-                target: 'http://127.0.0.1:8001',
+                target: 'http://127.0.0.1:8011',
                 changeOrigin: true,
             },
             '/sse': {
-                target: 'http://127.0.0.1:8001',
+                target: 'http://127.0.0.1:8011',
                 changeOrigin: true,
             },
         },

@@ -188,7 +188,7 @@ export function RAGChatPage() {
                   className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{video.filename}</p>
+                  <p className="font-medium text-sm truncate">{video.title || video.filename}</p>
                   <p className="text-xs text-muted-foreground truncate">{video.source_url || t('videoUpload.localUpload')}</p>
                 </div>
               </label>

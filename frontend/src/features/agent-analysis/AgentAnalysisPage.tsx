@@ -186,7 +186,7 @@ export function AgentAnalysisPage() {
                           onChange={() => handleMediaToggle(v.id)}
                           disabled={isDisabled}
                           className="h-4 w-4 rounded border-input text-primary focus:ring-primary disabled:cursor-not-allowed" />
-                        <span className="flex-1 text-sm">{v.filename}</span>
+                        <span className="flex-1 text-sm">{v.title || v.filename}</span>
                         {v.duration_ms != null && (
                           <span className="text-xs text-muted-foreground">
                             {(v.duration_ms / 1000).toFixed(0)}s

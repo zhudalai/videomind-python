@@ -208,6 +208,10 @@ def download_video_task(self, context: dict) -> dict:
                         media.fps = result.fps
                         media.minio_object = object_key
                         media.file_size = result.local_path.stat().st_size
+                        # yt-dlp 抓到的视频标题持久化进 meta_json，供前端卡片展示真实标题
+                        meta = dict(media.meta_json or {})
+                        meta["title"] = result.title
+                        media.meta_json = meta
                         await db.commit()
 
                 ctx.download_result = {
@@ -218,6 +222,7 @@ def download_video_task(self, context: dict) -> dict:
                     "height": result.height,
                     "fps": result.fps,
                     "minio_object": object_key,
+                    "title": result.title,
                 }
                 ctx.current_stage = "downloaded"
                 ctx.progress_pct = 20
