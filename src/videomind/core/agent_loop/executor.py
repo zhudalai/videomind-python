@@ -163,5 +163,6 @@ class Executor:
             f"证据上下文：\n{safe_context or '(无命中证据)'}\n\n"
             '返回 JSON：{"title": "...", '
             '"conclusions": [{"point": "...", "evidence_ids": ["EID_..."], "confidence": 0.0}], '
-            '"suggestions": ["..."]}'
+            '"suggestions": ["..."]}\n'
+            "请用与用户输入（分析目标）相同的语言回答。"
         )

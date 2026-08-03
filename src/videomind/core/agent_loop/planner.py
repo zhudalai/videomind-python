@@ -37,6 +37,7 @@ SYSTEM_PROMPT = (
     "输出 JSON 格式：\n"
     '{"tasks": [{"description": "...", "evidence_type": "...", '
     '"time_range": [start_ms, end_ms], "search_query": "..."}], "reasoning": "..."}'
+    "\n请用与用户输入相同的语言回答。"
 )
 
 MAX_TASKS = 5

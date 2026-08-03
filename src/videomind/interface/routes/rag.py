@@ -142,6 +142,7 @@ async def rag_chat(req: RagChatRequest, db: AsyncSession = Depends(get_db)) -> R
                     "你是 VideoMind 视频问答助手。基于给定的视频证据片段回答用户问题。"
                     "在回答中用 [EID_xxx_xx] 形式内联引用证据。"
                     "若证据不足以回答，如实说明。"
+                    "请用与用户输入相同的语言回答。"
                 ),
             },
             {

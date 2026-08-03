@@ -46,7 +46,7 @@ CRITIC_PROMPT = """你是一个分析结果质量评审器。请对以下分析�
 - structure_ok: bool, 结论结构是否合理
 - evidence_verified: bool, 证据是否经过校验
 - hallucination_risk: float (0.0-1.0), 幻觉风险评分
-"""
+（注意：请用与用户目标相同的语言输出评审反馈 feedback。）"""
 
 
 class Critic:
