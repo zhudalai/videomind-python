@@ -108,6 +108,23 @@ class TestQueryRewriterLLM:
         assert args[1] is sentinel_db
 
     @pytest.mark.asyncio
+    async def test_rewriter_disables_reasoning(self):
+        """reasoning=False 关 OpenRouter nemotron 思维链，免 content 含思考链致 json.loads 失败。"""
+        from videomind.core.intent.rewriter import QueryRewriter
+        import json
+
+        mock_llm = AsyncMock()
+        mock_llm.chat = AsyncMock()
+        mock_llm.chat.return_value.content = json.dumps({
+            "rewritten": "q", "sub_queries": ["q"], "entities": {}, "confidence": 0.9,
+        })
+        rw = QueryRewriter(llm=mock_llm)
+        await rw.rewrite("q", RewriteContext())
+
+        req = mock_llm.chat.call_args.args[0]
+        assert req.reasoning is False
+
+    @pytest.mark.asyncio
     async def test_default_threshold_is_0_5(self):
         """D-β: 默认 confidence_threshold=0.5，LLM 改写置信度 0.5 即可通过。"""
         from videomind.core.intent.rewriter import QueryRewriter

@@ -77,10 +77,14 @@ class QueryRewriter:
         try:
             # db 透传给 RoutingLLMService.chat(req, db) 做计费入库；
             # None 时 accounting 静默跳过入库（LLM 照调），故评测/无 session 路径不阻断。
+            # reasoning=False 关 OpenRouter reasoning 模型思维链：nemotron-3-ultra 等
+            # 默认吐思考链 + 末尾 JSON，json.loads(整段) 必失败全 fallback rule。
+            # 关思维链让模型直接吐纯 JSON，下游 json.loads 可解析（D-β 阈值方能生效）。
             resp = await self._llm.chat(ChatRequest(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=512,
+                reasoning=False,
             ), db)
             data = json.loads(resp.content)
             result = RewriteResult(

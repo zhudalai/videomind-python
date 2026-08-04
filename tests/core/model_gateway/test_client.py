@@ -193,3 +193,56 @@ async def test_chat_respects_base_url(chat_request):
     assert called_json["model"] == "test-model"
     assert called_json["stream"] is False
     assert called_json["temperature"] == 0.3
+
+
+# ----------------------------------------------------------------
+# test_chat_reasoning_forwarding
+# ----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_reasoning_false_serialized():
+    """reasoning=False -> body 含 {"reasoning": {"enabled": False}}（关 OpenRouter 思维链）。"""
+    mock_resp = _make_mock_response_200()
+    mock_http = _make_mock_http(mock_resp)
+    req = ChatRequest(messages=[{"role": "user", "content": "x"}], reasoning=False)
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        client = OpenAICompatibleClient(base_url="http://t.local/v1", api_key="sk")
+        await client.chat(req)
+        await client.close()
+
+    body = mock_http.post.call_args[1]["json"]
+    assert body["reasoning"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_chat_reasoning_true_serialized():
+    """reasoning=True -> body 含 {"reasoning": {"enabled": True}}。"""
+    mock_resp = _make_mock_response_200()
+    mock_http = _make_mock_http(mock_resp)
+    req = ChatRequest(messages=[{"role": "user", "content": "x"}], reasoning=True)
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        client = OpenAICompatibleClient(base_url="http://t.local/v1", api_key="sk")
+        await client.chat(req)
+        await client.close()
+
+    body = mock_http.post.call_args[1]["json"]
+    assert body["reasoning"] == {"enabled": True}
+
+
+@pytest.mark.asyncio
+async def test_chat_reasoning_none_omitted():
+    """reasoning=None -> body 不含 reasoning 字段（按模型默认，向后兼容旧行为）。"""
+    mock_resp = _make_mock_response_200()
+    mock_http = _make_mock_http(mock_resp)
+    req = ChatRequest(messages=[{"role": "user", "content": "x"}])
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        client = OpenAICompatibleClient(base_url="http://t.local/v1", api_key="sk")
+        await client.chat(req)
+        await client.close()
+
+    body = mock_http.post.call_args[1]["json"]
+    assert "reasoning" not in body

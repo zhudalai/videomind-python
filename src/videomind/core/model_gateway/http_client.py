@@ -78,6 +78,8 @@ class OpenAICompatibleClient:
         }
         if request.response_format:
             body["response_format"] = request.response_format
+        if request.reasoning is not None:
+            body["reasoning"] = {"enabled": request.reasoning}
 
         start = time.time()
         r = await self._client.post(
@@ -122,6 +124,10 @@ class OpenAICompatibleClient:
             "max_tokens": request.max_tokens,
             "stream": True,
         }
+        if request.response_format:
+            body["response_format"] = request.response_format
+        if request.reasoning is not None:
+            body["reasoning"] = {"enabled": request.reasoning}
 
         r = await self._client.post(
             f"{self._base_url}/chat/completions", json=body

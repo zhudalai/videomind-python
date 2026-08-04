@@ -76,6 +76,9 @@ class ChatRequest:
         trace_id: 追踪 ID，自动生成 32 位 hex。
         timeout: 请求超时秒数。
         task_type: 任务类型（chat/embedding/rerank），用于指标分类。
+        reasoning: OpenRouter reasoning 模型思维链开关（None=不传，按模型默认；
+            False=禁用思维链直接吐最终答案，适合需纯 JSON 解析的调用点如 rewriter；
+            True=显式启用）。序列化为 OpenRouter body 的 ``{"reasoning": {"enabled": ...}}``。
     """
 
     messages: list[dict]
@@ -89,6 +92,7 @@ class ChatRequest:
     trace_id: str = field(default_factory=lambda: uuid.uuid4().hex[:32])
     timeout: float = 60.0
     task_type: TaskType | None = None
+    reasoning: bool | None = None
 
 
 @dataclass
