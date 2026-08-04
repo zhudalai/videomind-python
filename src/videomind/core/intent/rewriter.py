@@ -51,10 +51,13 @@ class QueryRewriter:
 
     Args:
         llm: LLM 客户端（需实现 async chat(ChatRequest) -> ChatResponse）。
-        confidence_threshold: LLM 置信度阈值，低于此值降级规则改写（D-β 默认 0.5，原 0.7）。
+        confidence_threshold: LLM 置信度阈值，低于此值降级规则改写。D-β 验证后定 0.7：
+            0.5 在 9 条评测集上 1UP/3DN 净负——对 base_rank 已精确（≤4）的查询扩散子查询注入
+            噪声，把 rank 1 冲到 21（见 results_queryrewriter.json）。0.7 保守，仅高置信开火，
+            保留 zh_001 这种欠指定查询的 UP，规避已精确查询的扩散恶化。
     """
 
-    def __init__(self, llm, confidence_threshold: float = 0.5):
+    def __init__(self, llm, confidence_threshold: float = 0.7):
         self._llm = llm
         self._threshold = confidence_threshold
         self._rule_rw = RuleRewriter()

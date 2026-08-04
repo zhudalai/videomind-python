@@ -125,22 +125,27 @@ class TestQueryRewriterLLM:
         assert req.reasoning is False
 
     @pytest.mark.asyncio
-    async def test_default_threshold_is_0_5(self):
-        """D-β: 默认 confidence_threshold=0.5，LLM 改写置信度 0.5 即可通过。"""
+    async def test_default_threshold_is_0_7(self):
+        """D-β 验证后默认 confidence_threshold=0.7；置信度=0.7（=阈值）通过走 LLM。
+
+        回归：0.5 阈值在 9 条评测集上 1UP/3DN 净负——对 base 已精确（≤4）的查询，
+        LLM 扩散子查询把 rank 1 冲到 21（见 results_queryrewriter.json）。
+        0.7 仅高置信开火，保留欠指定查询的 UP，规避精确查询的扩散恶化。
+        """
         from videomind.core.intent.rewriter import QueryRewriter
 
         mock_llm = AsyncMock()
-        mock_llm.chat = AsyncMock(return_value=type("Resp", (), {"content": '{"rewritten": "q", "sub_queries": [], "entities": {}, "confidence": 0.5}'})())
+        mock_llm.chat = AsyncMock(return_value=type("Resp", (), {"content": '{"rewritten": "q", "sub_queries": [], "entities": {}, "confidence": 0.7}'})())
 
         rw = QueryRewriter(llm=mock_llm)
         result = await rw.rewrite("q", RewriteContext())
 
         assert result.method == "llm"
-        assert result.confidence == 0.5
+        assert result.confidence == 0.7
 
     @pytest.mark.asyncio
     async def test_low_confidence_below_new_threshold_falls_back(self):
-        """D-β: 置信度 0.4 < 0.5 阈值 -> 降级规则改写。"""
+        """置信度 0.4 < 0.7 阈值 -> 降级规则改写。"""
         from videomind.core.intent.rewriter import QueryRewriter
 
         mock_llm = AsyncMock()

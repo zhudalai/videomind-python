@@ -1,0 +1,123 @@
+[
+  {
+    "qid": "zh_001",
+    "difficulty": "normal",
+    "language": "zh",
+    "method": "llm",
+    "sub_queries": [
+      "宫本武藏的父亲新免无二年轻时是否真的杀过人/打死过人",
+      "关于父亲杀人案, 宫本武藏本人在《五轮书》或其他著作中是如何记载/辩解的",
+      "新免无二(新免无二斋)杀人案的具体历史细节及官方判决结果",
+      "史料中父亲新免无二本人对杀人事件的供述或辩解内容"
+    ],
+    "baseline_rank": 52,
+    "multi_query_rank": 49,
+    "improvement": "UP"
+  },
+  {
+    "qid": "zh_002",
+    "difficulty": "hard",
+    "language": "zh",
+    "method": "llm",
+    "sub_queries": [
+      "宮本武藏 14 岁 离乡 漂泊 的 具体 原因 是 什么",
+      "宮本武藏 幼年 家庭 背景 及 成长 环境 如何",
+      "宮本武藏 早年 漂泊 期间 经历 了 什么 重要 事件",
+      "宮本武藏 为何 选择 剑客 之路 而 非 留乡 务农 或 仕官"
+    ],
+    "baseline_rank": 18,
+    "multi_query_rank": 25,
+    "improvement": "DN"
+  },
+  {
+    "qid": "zh_003",
+    "difficulty": "normal",
+    "language": "zh",
+    "method": "llm",
+    "sub_queries": [
+      "宫本武藏 与 有马 家 一门 对决 发生 在 哪座 城外 寺庙",
+      "宫本武藏 与 有马 家 一门 对决 的 具体 时间 是 何时",
+      "有马 家 一门 大约 七八十 人 与 宫本武藏 对决 的 事件 细节"
+    ],
+    "baseline_rank": 1,
+    "multi_query_rank": 3,
+    "improvement": "DN"
+  },
+  {
+    "qid": "ja_001",
+    "difficulty": "normal",
+    "language": "ja",
+    "method": "rule",
+    "sub_queries": [
+      "前回は畠山氏がなぜ二つに割れたかを解説した、今回の題材は誰ですか"
+    ],
+    "baseline_rank": 4,
+    "multi_query_rank": 4,
+    "improvement": "=="
+  },
+  {
+    "qid": "ja_002",
+    "difficulty": "hard",
+    "language": "ja",
+    "method": "llm",
+    "sub_queries": [
+      "室町時代に山名氏の当主が相次いで死去した経緯と時期は何か",
+      "山名氏で後継者問題が生じた具体的な理由と家督争いの構図は何か",
+      "山名氏の内紛が応仁の乱の勃発にどう繋がったか",
+      "守護大名山名氏の没落と戦国時代への影響は何か"
+    ],
+    "baseline_rank": 25,
+    "multi_query_rank": 66,
+    "improvement": "DN"
+  },
+  {
+    "qid": "ja_003",
+    "difficulty": "normal",
+    "language": "ja",
+    "method": "llm",
+    "sub_queries": [
+      "応仁の乱で上司が転居・撤退したことで主従関係が途切れた人物は誰か",
+      "応仁の乱において主君が国元に帰還したことで影響力を失った有力者は誰か",
+      "応仁の乱の最中に上役が京都を離れたことで実権を失った人物の特定"
+    ],
+    "baseline_rank": 1,
+    "multi_query_rank": 61,
+    "improvement": "DN"
+  },
+  {
+    "qid": "ja_004",
+    "difficulty": "hard",
+    "language": "ja",
+    "method": "rule",
+    "sub_queries": [
+      "長らく幽閉生活を強いられていた関係者がついに反撃の好機を得た出来事は何か"
+    ],
+    "baseline_rank": 57,
+    "multi_query_rank": 57,
+    "improvement": "=="
+  },
+  {
+    "qid": "ja_005",
+    "difficulty": "normal",
+    "language": "ja",
+    "method": "err:TimeoutError",
+    "sub_queries": [
+      "宿敵同士が長年争い続けてきたこと、その対立に二人の実力者が肩入れしたことで戦端が開かれた経緯"
+    ],
+    "baseline_rank": 1,
+    "multi_query_rank": 1,
+    "improvement": "=="
+  },
+  {
+    "qid": "ja_006",
+    "difficulty": "normal",
+    "language": "ja",
+    "method": "err:TimeoutError",
+    "sub_queries": [
+      "京の街が混乱する元凶となった下級武士層と、戦況が動かない中で将軍が講和のために都に呼び戻した人物"
+    ],
+    "baseline_rank": 1,
+    "multi_query_rank": 1,
+    "improvement": "=="
+  }
+]
