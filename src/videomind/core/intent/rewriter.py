@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
 
 import structlog
 
@@ -58,7 +59,7 @@ class QueryRewriter:
         self._threshold = confidence_threshold
         self._rule_rw = RuleRewriter()
 
-    async def rewrite(self, query: str, context: RewriteContext) -> RewriteResult:
+    async def rewrite(self, query: str, context: RewriteContext, *, db: Any = None) -> RewriteResult:
         prompt = (
             "你是视频理解助手的查询改写器。用户查询改写和拆解。\n\n"
             f"用户查询：{query}\n"
@@ -74,11 +75,13 @@ class QueryRewriter:
         )
 
         try:
+            # db 透传给 RoutingLLMService.chat(req, db) 做计费入库；
+            # None 时 accounting 静默跳过入库（LLM 照调），故评测/无 session 路径不阻断。
             resp = await self._llm.chat(ChatRequest(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=512,
-            ))
+            ), db)
             data = json.loads(resp.content)
             result = RewriteResult(
                 original=query,

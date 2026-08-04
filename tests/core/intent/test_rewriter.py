@@ -82,6 +82,32 @@ class TestQueryRewriterLLM:
         assert result.confidence == 0.6
 
     @pytest.mark.asyncio
+    async def test_db_forwarded_to_llm_chat(self):
+        """LLM chat 需 db 计费 —— rewriter 须把 db 透传给 chat(req, db)。
+
+        回归：D-β 评测暴露 RoutingLLMService.chat 缺 db 抛 TypeError 致
+        9 条全 fallback rule；生产 rewriter LLM 改写从未生效过。
+        """
+        from videomind.core.intent.rewriter import QueryRewriter
+        import json
+
+        mock_llm = AsyncMock()
+        mock_llm.chat = AsyncMock()
+        mock_llm.chat.return_value.content = json.dumps({
+            "rewritten": "q", "sub_queries": ["q"], "entities": {}, "confidence": 0.9,
+        })
+        sentinel_db = object()
+
+        rw = QueryRewriter(llm=mock_llm)
+        await rw.rewrite("q", RewriteContext(), db=sentinel_db)
+
+        assert mock_llm.chat.await_count == 1
+        args = mock_llm.chat.call_args.args
+        # 第二位置参数须是透传来的 db（首位是 ChatRequest）
+        assert len(args) >= 2
+        assert args[1] is sentinel_db
+
+    @pytest.mark.asyncio
     async def test_default_threshold_is_0_5(self):
         """D-β: 默认 confidence_threshold=0.5，LLM 改写置信度 0.5 即可通过。"""
         from videomind.core.intent.rewriter import QueryRewriter
