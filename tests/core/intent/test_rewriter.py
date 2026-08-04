@@ -80,3 +80,31 @@ class TestQueryRewriterLLM:
 
         assert result.method == "rule"
         assert result.confidence == 0.6
+
+    @pytest.mark.asyncio
+    async def test_default_threshold_is_0_5(self):
+        """D-β: 默认 confidence_threshold=0.5，LLM 改写置信度 0.5 即可通过。"""
+        from videomind.core.intent.rewriter import QueryRewriter
+
+        mock_llm = AsyncMock()
+        mock_llm.chat = AsyncMock(return_value=type("Resp", (), {"content": '{"rewritten": "q", "sub_queries": [], "entities": {}, "confidence": 0.5}'})())
+
+        rw = QueryRewriter(llm=mock_llm)
+        result = await rw.rewrite("q", RewriteContext())
+
+        assert result.method == "llm"
+        assert result.confidence == 0.5
+
+    @pytest.mark.asyncio
+    async def test_low_confidence_below_new_threshold_falls_back(self):
+        """D-β: 置信度 0.4 < 0.5 阈值 -> 降级规则改写。"""
+        from videomind.core.intent.rewriter import QueryRewriter
+
+        mock_llm = AsyncMock()
+        mock_llm.chat = AsyncMock(return_value=type("Resp", (), {"content": '{"rewritten": "q", "sub_queries": [], "entities": {}, "confidence": 0.4}'})())
+
+        rw = QueryRewriter(llm=mock_llm)
+        result = await rw.rewrite("q", RewriteContext())
+
+        assert result.method == "rule"
+        assert result.confidence == 0.6

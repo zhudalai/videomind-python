@@ -50,10 +50,10 @@ class QueryRewriter:
 
     Args:
         llm: LLM 客户端（需实现 async chat(ChatRequest) -> ChatResponse）。
-        confidence_threshold: LLM 置信度阈值，低于此值降级规则改写。
+        confidence_threshold: LLM 置信度阈值，低于此值降级规则改写（D-β 默认 0.5，原 0.7）。
     """
 
-    def __init__(self, llm, confidence_threshold: float = 0.7):
+    def __init__(self, llm, confidence_threshold: float = 0.5):
         self._llm = llm
         self._threshold = confidence_threshold
         self._rule_rw = RuleRewriter()
