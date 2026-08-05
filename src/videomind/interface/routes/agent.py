@@ -42,9 +42,13 @@ class AnalyzeRequest(BaseModel):
 
     goal: str = Field(..., min_length=1, max_length=5000, description="分析目标")
     media_ids: list[uuid.UUID] = Field(
-        ..., min_length=1, max_length=2, description="目标视频列表（≥1，≤2）")
+        ..., min_length=1, max_length=4,
+        description="目标视频列表（≥1，≤4）。max_length=2 不够覆盖三方对比任务，"
+                    "放宽至 4，匹配 Execution 并发检索不到 10ms 增量。")
     user_id: uuid.UUID = Field(..., description="发起用户 ID（auth 实现前由前端传入）")
-    max_rounds: int = Field(2, ge=1, le=2, description="最大轮数；上限 2")
+    max_rounds: int = Field(2, ge=1, le=3,
+        description="最大轮数；默认 2、上限 3。3 多一轮让 Critic 反馈能被真吸收，"
+                    "适合跨视频对比任务")
 
     @field_validator("media_ids", mode="after")
     @classmethod

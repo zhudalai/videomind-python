@@ -82,7 +82,7 @@
     "smartQnATitle": "Smart Q&A",
     "smartQnADesc": "Ask questions based on video content",
     "deepAnalysisTitle": "Deep Analysis",
-    "deepAnalysisDesc": "Goal-driven complex analysis",
+    "deepAnalysisDesc": "Goal-driven complex analysis: Planner→Executor→Critic, up to 3 rounds, 4 videos",
     "recentVideos": "Recent Videos",
     "systemHealth": "System Health",
     "allHealthy": "All Healthy",
@@ -152,7 +152,7 @@
   },
   "agentAnalysis": {
     "title": "Agent Deep Analysis",
-    "subtitle": "Goal-driven multi-round analysis: Planner → Executor → Critic, up to 2 rounds",
+    "subtitle": "Goal-driven multi-round analysis: Planner → Executor → Critic, up to 3 rounds, supports 4 videos",
     "analysisGoal": "Analysis Goal",
     "goalPlaceholder": "e.g., Analyze the business model discussed in this video, summarize the main arguments and supporting evidence",
     "goalCounter": "{count} / 5000",
@@ -165,6 +165,7 @@
     "maxRounds": "Max Rounds",
     "oneRound": "1 round (no retry)",
     "twoRounds": "2 rounds (Critic can retry if not passed)",
+    "threeRounds": "3 rounds (Critic feedback absorbed, good for cross-video compare)",
     "submit": "Submit",
     "submitting": "Submitting...",
     "startAnalysis": "Start Analysis",
@@ -193,7 +194,7 @@
     "devIdentityHint": "Dev identity not ready (no user config); cannot submit",
     "criticFeedback": "Critic feedback",
     "costPending": "cost pending",
-    "maxVideosReached": "Maximum 2 videos allowed"
+    "maxVideosReached": "Maximum 4 videos allowed"
   },
   "pipeline": {
     "title": "Processing Pipeline",

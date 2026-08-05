@@ -49,7 +49,7 @@ export function AgentAnalysisPage() {
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     )
 
-  const isAtMaxVideos = selectedMediaIds.length >= 2
+  const isAtMaxVideos = selectedMediaIds.length >= 4
 
   const { data: userConfig } = useQuery({
     queryKey: ['user', 'config', 'dev'],
@@ -221,6 +221,7 @@ export function AgentAnalysisPage() {
               >
                 <option value={1}>{t('agentAnalysis.oneRound')}</option>
                 <option value={2}>{t('agentAnalysis.twoRounds')}</option>
+                <option value={3}>{t('agentAnalysis.threeRounds')}</option>
               </select>
             </div>
           </div>

@@ -82,7 +82,7 @@
     "smartQnATitle": "智能问答",
     "smartQnADesc": "基于视频内容提问",
     "deepAnalysisTitle": "深度分析",
-    "deepAnalysisDesc": "目标驱动的复杂分析",
+    "deepAnalysisDesc": "目标驱动的复杂分析：Planner→Executor→Critic，最多 3 轮、支持 4 视频",
     "recentVideos": "最近视频",
     "systemHealth": "系统健康状态",
     "allHealthy": "全部正常",
@@ -152,7 +152,7 @@
   },
   "agentAnalysis": {
     "title": "Agent 深度分析",
-    "subtitle": "目标驱动的多轮分析：Planner 规划 → Executor 执行 → Critic 评审，最多 2 轮闭环",
+    "subtitle": "目标驱动的多轮分析：Planner 规划 → Executor 执行 → Critic 评审，最多 3 轮闭环，支持 4 视频对比",
     "analysisGoal": "分析目标",
     "goalPlaceholder": "例如：分析这个视频讲解的商业模式，总结核心论点与支撑证据",
     "goalCounter": "{count} / 5000",
@@ -165,6 +165,7 @@
     "maxRounds": "最大轮数",
     "oneRound": "1 轮（不重试）",
     "twoRounds": "2 轮（Critic 不通过可重试）",
+    "threeRounds": "3 轮（Critic 反馈可被真吸收，适合跨视频对比）",
     "submit": "提交",
     "submitting": "提交中...",
     "startAnalysis": "开始分析",
@@ -193,7 +194,7 @@
     "devIdentityHint": "Dev 身份未就绪（未取到 user config），暂不可提交",
     "criticFeedback": "评审反馈",
     "costPending": "费用待核算",
-    "maxVideosReached": "最多选择 2 个视频"
+    "maxVideosReached": "最多选择 4 个视频"
   },
   "pipeline": {
     "title": "处理进度",

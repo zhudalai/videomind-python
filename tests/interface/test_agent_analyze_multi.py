@@ -125,3 +125,69 @@ async def test_analyze_rejects_empty_media_ids_422(pg_session) -> None:
             "goal": "g1", "media_ids": [],
             "user_id": str(uid), "max_rounds": 2})
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_analyze_accepts_max_rounds_3(pg_session) -> None:
+    """max_rounds 上限限 2 → 3（合作方建议），critic 反馈可被真实吸收修正。
+
+    回归：浏览器跑深度对比任务 max_rounds=3 被 Pydantic  422 挡死。
+    """
+    from videomind.interface.routes import agent as agent_mod
+
+    uid, m1, m2, _nr = await _seed(pg_session)
+    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as c:
+            r = await c.post("/api/agent/analyze", json={
+                "goal": "g1", "media_ids": [str(m1), str(m2)],
+                "user_id": str(uid), "max_rounds": 3})
+    assert r.status_code == 202, r.text
+    assert r.json()["max_rounds"] == 3
+
+
+@pytest.mark.asyncio
+async def test_analyze_rejects_max_rounds_4_still(pg_session) -> None:
+    """max_rounds > 3 仍需拒绝（防止误用上限）。"""
+    from videomind.interface.routes import agent as agent_mod
+
+    uid, m1, m2, _nr = await _seed(pg_session)
+    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as c:
+            r = await c.post("/api/agent/analyze", json={
+                "goal": "g1", "media_ids": [str(m1), str(m2)],
+                "user_id": str(uid), "max_rounds": 4})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_analyze_accepts_4_media_ids(pg_session) -> None:
+    """media_ids 上限 限 2→4（多视频对比需求，2 不够覆盖三路视频）。
+
+    回归：Pydantic max_length=2 硬限，跨多视频对比路由被 422 拒。
+    """
+    from videomind.interface.routes import agent as agent_mod
+
+    uid = _uuid.uuid4()
+    mids = [_uuid.uuid4() for _ in range(4)]
+    pg_session.add(m.User(id=uid, username=f"u{uid.hex[:8]}",
+        email=f"{uid.hex[:8]}@t.com", is_active=True, is_superuser=False,
+        password_hash="x", full_name=None, phone=None,
+        avatar_url=None, real_name=None))
+    await pg_session.flush()
+    for i, mid in enumerate(mids):
+        pg_session.add(m.MediaFile(id=mid, user_id=uid, source_type="upload",
+            content_hash=f"h{mid.hex[:8]}", filename=f"v{i}.mp4", mime_type="video/mp4",
+            file_size=1, duration_ms=1000 * (i + 1), status="ready",
+            minio_bucket="test-bucket", minio_object=f"videos/{mid.hex[:8]}/original.mp4"))
+    await pg_session.commit()
+
+    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as c:
+            r = await c.post("/api/agent/analyze", json={
+                "goal": "g1",
+                "media_ids": [str(x) for x in mids],
+                "user_id": str(uid), "max_rounds": 3})
+    assert r.status_code == 202, r.text
