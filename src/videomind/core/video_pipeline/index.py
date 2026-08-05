@@ -77,6 +77,10 @@ class Indexer:
         # 必须清旧再插入，否则 IntegrityError(UniqueViolation chunk.pkey)。
         await db.execute(delete(m.Chunk).where(m.Chunk.media_id == media_id))
         await db.flush()
+        # 同步失效该 media 的 HybridRetriever 进程缓存（rag.pipeline 按 media_id 单例缓存
+        # BM25 索引），否则重处理后的新 chunk 不会进检索，老 chunk 已删会导致缓存陈旧。
+        from videomind.core.rag.pipeline import invalidate_retriever_cache
+        invalidate_retriever_cache(media_id)
         # 同步清掉 Qdrant 旧 points（按 payload.media_id 过滤），保持双写一致
         try:
             from qdrant_client.http import models as qm

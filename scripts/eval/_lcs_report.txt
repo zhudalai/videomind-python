@@ -1,0 +1,11 @@
+self-retrieval LCS 检查（阈值 <=5 通过）:
+
+  zh_001 PASS LCS= 1  match='是'  diff=normal
+  zh_002 PASS LCS= 1  match='年'  diff=hard
+  zh_003 PASS LCS= 3  match='城外的'  diff=normal
+  ja_001 PASS LCS= 4  match='氏がなぜ'  diff=normal
+  ja_002 PASS LCS= 2  match='った'  diff=hard
+  ja_003 PASS LCS= 3  match='力を失'  diff=normal
+  ja_004 PASS LCS= 3  match='ていた'  diff=hard
+  ja_005 PASS LCS= 5  match='が肩入れし'  diff=normal
+  ja_006 PASS LCS= 5  match='都に呼び戻'  diff=normal

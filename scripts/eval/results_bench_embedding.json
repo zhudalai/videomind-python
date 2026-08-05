@@ -1,0 +1,18 @@
+{
+  "local_bge_m3_cpu": {
+    "device": "cpu",
+    "model": "BAAI/bge-m3",
+    "load_s": 7.79,
+    "median_ms": 127.1,
+    "min_ms": 119.3,
+    "max_ms": 146.8,
+    "dim": 1024
+  },
+  "openrouter_nemotron_embed": {
+    "provider": "openrouter",
+    "model": "nvidia/nemotron-3-embed-1b:free",
+    "url": "https://openrouter.ai/api/v1/embeddings",
+    "median_ms": 793.5,
+    "dim": 2048
+  }
+}

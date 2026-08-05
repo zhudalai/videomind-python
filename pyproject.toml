@@ -43,6 +43,7 @@ dependencies = [
     "paddlepaddle>=2.6.0",
     "sentence-transformers>=3.2.0",  # 本地 Embedding 路径
     "rank-bm25>=0.2.2",             # RAG BM25 关键词检索
+    "jieba>=0.42.1",                # CJK 分词（BM25 中文/日文检索混合分词）
     # 可观测性
     "prometheus-client>=0.21.0",
     "opentelemetry-api>=1.27.0",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -103,3 +104,76 @@ async def test_executor_malformed_json_graceful() -> None:
     # 优雅降级，不抛异常
     assert len(result.conclusions) == 0
     assert len(result.suggestions) == 0
+
+
+# ---------------------------------------------------------------------------
+# P2-5 D-α：召回水位分层常量 + _RagRetriever 透传
+# ---------------------------------------------------------------------------
+
+
+def test_executor_recall_depth_constants():
+    """RECALL_TOP_K=60 / LLM_CONTEXT_TOP_K=12 符合 D-α 设计。"""
+    from videomind.core.agent_loop.executor import RECALL_TOP_K, LLM_CONTEXT_TOP_K
+
+    assert RECALL_TOP_K == 60
+    assert LLM_CONTEXT_TOP_K == 12
+
+
+@pytest.mark.asyncio
+async def test_executor_passes_recall_depth_to_retriever():
+    """executor.execute 调用 _retriever.search 时传 top_k=LLM_CONTEXT_TOP_K, recall_k=RECALL_TOP_K。"""
+    from videomind.core.agent_loop.executor import Executor, RECALL_TOP_K, LLM_CONTEXT_TOP_K
+    from videomind.core.agent_loop.types import AgentState, AgentPlan, SubTask, VideoMeta
+
+    mock_llm = AsyncMock()
+    mock_llm.chat = AsyncMock()
+    mock_llm.chat.return_value.content = json.dumps({"title": "T", "conclusions": [], "suggestions": []})
+    mock_retriever = AsyncMock()
+    mock_retriever.search = AsyncMock(return_value=[])
+    MID = "00000000-0000-0000-0000-000000000001"
+    executor = Executor(mock_llm, retriever=mock_retriever)
+    state = AgentState(
+        goal="g",
+        media_ids=[MID],
+        video_meta=[VideoMeta(media_id=MID, filename="a.mp4")],
+        plan=AgentPlan(
+            tasks=[SubTask(id="task_1", description="d", required_evidence_type="text")],
+            reasoning="r",
+        ),
+    )
+    mock_db = AsyncMock(spec=AsyncSession)
+    await executor.execute(state, mock_db)
+
+    assert mock_retriever.search.await_count == 1
+    kwargs = mock_retriever.search.call_args.kwargs
+    assert kwargs["top_k"] == LLM_CONTEXT_TOP_K
+    assert kwargs["recall_k"] == RECALL_TOP_K
+
+
+@pytest.mark.asyncio
+async def test_rag_retriever_forwards_recall_k(monkeypatch):
+    """_RagRetriever.search 将 recall_k 透传给 pipeline.search。"""
+    from videomind.core.agent_loop.executor import _RagRetriever
+
+    mock_db = AsyncMock()
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return mock_db
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr("videomind.infrastructure.storage.database.AsyncSessionLocal", _FakeSession)
+    captured = {}
+
+    async def fake_search(db, query, media_id, *, top_k, recall_k=None, **kw):
+        captured["top_k"] = top_k
+        captured["recall_k"] = recall_k
+        return {"context": [], "evidence": [], "raw_hits": []}
+
+    monkeypatch.setattr("videomind.core.rag.pipeline.search", fake_search)
+
+    await _RagRetriever().search("q", uuid.uuid4(), top_k=12, recall_k=60)
+    assert captured["top_k"] == 12
+    assert captured["recall_k"] == 60

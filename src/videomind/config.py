@@ -110,6 +110,24 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 60.0
     llm_first_packet_timeout_s: float = 10.0
 
+    # ── Cross-encoder 重排配置（P2-1，opt-in，默认 off）──
+    # rerank_provider 三档与 asr/ocr/embedding 双路径范式对齐：
+    #   off   = 固定权重 DeterministicReranker（不破坏现有行为，opt-in 前的默认）
+    #   api   = OpenRouter /api/v1/rerank 远程 cross-encoder（需 API key，纯文本渠道）
+    #   local = 本地 BGE-reranker-v2-m3（与 BGE-M3 embedder 同源、离线零成本、CJK 友好）
+    # api/local 主后端缺配置/缺依赖/加载失败时，工厂自动降级 DeterministicRerankerAdapter 兜底，
+    # 重排链路总有可用后端。默认 off：避免改动现状；是否带来质量收益由 P2-2 QA 评估集量化。
+    rerank_provider: Literal["off", "api", "local"] = "off"
+    rerank_api_base_url: str = "https://openrouter.ai/api/v1"
+    rerank_api_key: str = ""
+    # OpenRouter 免费档：原生 rerank 端点（query+documents→relevance_score）；纯文本 RAG 不用 image 渠道
+    rerank_api_model: str = "nvidia/llama-nemotron-rerank-vl-1b-v2:free"
+    rerank_local_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_local_device: Literal["auto", "cuda", "cpu"] = "cpu"
+    # 限候选量，避免 cross-encoder scoring 成本与请求体积过大
+    rerank_top_n: int = 20
+    rerank_timeout_s: float = 30.0
+
     # ── 视频处理 ──
     video_segment_window_ms: int = 60000
     video_chunk_overlap_ms: int = 1000

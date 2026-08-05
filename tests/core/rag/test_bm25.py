@@ -155,3 +155,62 @@ class TestRegistry:
         assert b.search("banana")[0][0] == cb.id
         # b 搜不到 apple
         assert all(r[0] != ca.id for r in b.search("apple"))
+
+
+class TestCJKSegmentation:
+    """CJK（中日文）分词——验证不再把整段无空格文本当成单个 token。
+
+    背景：原实现 ``content.lower().split()`` 对无空格的 CJK 文本几乎不分词，
+    导致 BM25 退化为整段字符串精确匹配，丧失词法分辨力。
+    改进后对 CJK 文本做分词（jieba 中文 + 字符 bigram 兜底日文/假名），
+    使含共享词的查询能命中对应 chunk。
+
+    注：BM25Okapi 的 IDF 在小语料上可能为 0 或负（N=2,n=1 时 IDF=0；单文档 IDF<0，
+    见 test_single_chunk 注释）。为保证断言 ``score > 0`` 成立，本组用 ≥3 文档、
+    且相关词只在 1 个 chunk 出现，使 IDF>0。
+    """
+
+    def test_chinese_shared_word_ranks_relevant_chunk_first(self):
+        """中文：3 个 chunk，query 只与其中 1 个共享 jieba 词，应排第一且分数严格更高。"""
+        c_rel = _FakeChunk(uuid.uuid4(), "深度学习在图像识别与自然语言处理中的应用")
+        c_irr1 = _FakeChunk(uuid.uuid4(), "心理学基础知识与情绪管理方法")
+        c_irr2 = _FakeChunk(uuid.uuid4(), "育儿知识与儿童早期教育指南")
+        bm25 = InMemoryBM25()
+        bm25.build([c_rel, c_irr1, c_irr2])
+
+        results = bm25.search("深度学习", top_k=3)
+        assert len(results) == 3
+        # 相关 chunk 必须排第一，且分数严格高于两个无关 chunk（排除全 0 误判）
+        assert results[0][0] == c_rel.id
+        assert results[0][1] > results[1][1]
+        assert results[0][1] > results[2][1]
+
+    def test_chinese_query_matches_chunk_via_shared_tokens(self):
+        """中文：改之前整段为一个 token、BM25 score 全 0；改后借分词命中，score>0。"""
+        c_rel = _FakeChunk(uuid.uuid4(), "这个视频介绍了商业模式与盈利计划")
+        c_irr1 = _FakeChunk(uuid.uuid4(), "天气预报说今天会下雨")
+        c_irr2 = _FakeChunk(uuid.uuid4(), "我对烹饪技巧很感兴趣")
+        bm25 = InMemoryBM25()
+        bm25.build([c_rel, c_irr1, c_irr2])
+
+        results = bm25.search("商业模式", top_k=3)
+        assert results[0][0] == c_rel.id
+        # 命中分数应 > 0（'商业'/'业模'/'模式' 2-gram 只在 c_rel 出现 → IDF>0）
+        assert results[0][1] > 0.0
+
+    def test_japanese_bigram_recall(self):
+        """日文假名：字符 bigram 让 query 召回含相同假名串的 chunk。
+
+        jieba 不切日文假名连续串；2-gram 在字符级稳定，使 query 与 chunk
+        的假名子串必然共享相同 2-gram。
+        """
+        c_rel = _FakeChunk(uuid.uuid4(), "はいどうもみなさんこんにちは今回の動画")
+        c_irr1 = _FakeChunk(uuid.uuid4(), "天気予報によると明日は雨になる")
+        c_irr2 = _FakeChunk(uuid.uuid4(), "料理番組でパスタを作ってみる")
+        bm25 = InMemoryBM25()
+        bm25.build([c_rel, c_irr1, c_irr2])
+
+        results = bm25.search("みなさん", top_k=3)
+        assert results[0][0] == c_rel.id
+        # 假名 2-gram 'みな'/'なさ'/'さん' 只在 c_rel 出现 → IDF>0 → score>0
+        assert results[0][1] > 0.0

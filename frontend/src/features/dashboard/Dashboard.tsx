@@ -1,12 +1,13 @@
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
-import { Progress } from '@/components/ui/Progress'
 import { healthApi, videoApi } from '@/lib/api'
-import { cn, getStatusColor } from '@/lib/utils'
-import { Link } from 'react-router-dom'
+import { cn, getStatusColor, formatDuration, formatFileSize, formatRelativeTime, getVideoThumbnailUrl } from '@/lib/utils'
+import { Link, useNavigate } from 'react-router-dom'
+import type { MediaFileResponse } from '@/types/api'
 import {
   Video,
   Upload,
@@ -16,8 +17,10 @@ import {
   CheckCircle,
   AlertCircle,
   Clock,
+  FileText,
   Trash2,
   Eye,
+  Loader2,
 } from 'lucide-react'
 
 const quickActions = [
@@ -158,7 +161,7 @@ export function Dashboard() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {videos?.items?.map(video => (
-            <VideoCard key={video.id} video={video} onDelete={handleDelete} />
+            <VideoCard key={video.id} video={video} onDelete={(v) => handleDelete(v.id)} isDeleting={deleteMutation.isPending && deleteMutation.variables === video.id} />
           ))}
         </div>
       )}
@@ -166,85 +169,110 @@ export function Dashboard() {
   )
 }
 
-function VideoCard({ video, onDelete }: { video: { id: string; filename: string; status: string; duration_ms: number | null; created_at: string; file_size: number; error_message: string | null }; onDelete: (id: string) => void }) {
+function VideoCard({ video, onDelete, isDeleting }: { video: MediaFileResponse; onDelete: (video: MediaFileResponse) => void; isDeleting: boolean }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const [thumbBroken, setThumbBroken] = useState(false)
+  const videoId = video.id
+  useEffect(() => { setThumbBroken(false) }, [videoId])
 
-  const formatTimeAgo = (date: string | Date) => {
-    const now = new Date()
-    const then = new Date(date)
-    const diffMs = now.getTime() - then.getTime()
-    const diffSecs = Math.floor(diffMs / 1000)
-    const diffMins = Math.floor(diffSecs / 60)
-    const diffHours = Math.floor(diffMins / 60)
-    const diffDays = Math.floor(diffHours / 24)
-    if (diffSecs < 60) return t('utils.justNow')
-    if (diffMins < 60) return t('utils.minutesAgo', { count: diffMins })
-    if (diffHours < 24) return t('utils.hoursAgo', { count: diffHours })
-    if (diffDays < 7) return t('utils.daysAgo', { count: diffDays })
-    return new Date(date).toLocaleString()
+  const isReady = video.status === 'ready'
+  const thumbUrl = getVideoThumbnailUrl({
+    source_url: video.source_url,
+    thumbnail_object: video.thumbnail_object ?? null,
+    mime_type: video.mime_type,
+  })
+  const showThumb = !!thumbUrl && !thumbBroken
+
+  const displayTitle = (v: MediaFileResponse): string => {
+    const title = (v.title || '').trim()
+    if (title) return title
+    const fname = (v.filename || '').trim()
+    if (v.source_url) {
+      try { const u = new URL(v.source_url); return `${u.hostname.replace(/^www\./, '')} · ${fname || v.source_url}` } catch { return v.source_url }
+    }
+    return fname || '(untitled)'
   }
 
-
   return (
-    <Card className="group">
+    <Card className={cn('group relative overflow-hidden', isDeleting && 'opacity-70')}>
+      {/* deleting overlay */}
+      {isDeleting && (
+        <div className="absolute inset-0 z-10 bg-background/60 flex items-center justify-center pointer-events-none">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        </div>
+      )}
+
+      {/* Thumbnail */}
+      <div className="aspect-video bg-muted relative overflow-hidden">
+        <div className="absolute inset-0 flex items-center justify-center">
+          {!showThumb && <Video className="h-12 w-12 text-muted-foreground/50" />}
+          {showThumb && (
+            <img
+              src={thumbUrl!}
+              alt={displayTitle(video)}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 h-full w-full object-cover"
+              onError={() => setThumbBroken(true)}
+            />
+          )}
+        </div>
+        <div className="absolute top-2 right-2">
+          <Badge className={cn(getStatusColor(video.status), 'gap-1')}>
+            {isReady && <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />}
+            {video.status}
+          </Badge>
+        </div>
+        {isReady && (
+          <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button variant="secondary" size="icon" onClick={(e) => { e.stopPropagation(); navigate(`/videos/${video.id}`) }}>
+              <Eye className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </div>
+
       <CardContent className="p-4 space-y-3">
-        {/* Thumbnail placeholder */}
-        <div className="aspect-video bg-muted rounded-lg relative overflow-hidden">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Video className="h-10 w-10 text-muted-foreground/50" />
-          </div>
-          <div className="absolute top-2 right-2">
-            <Badge className={cn(getStatusColor(video.status))}>
-              {video.status}
-            </Badge>
-          </div>
+        <h3 className="font-medium line-clamp-1" title={video.filename}>{displayTitle(video)}</h3>
+
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          {video.duration_ms != null && (
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {formatDuration(video.duration_ms)}
+            </span>
+          )}
+          {video.file_size > 0 && (
+            <span className="flex items-center gap-1">
+              <FileText className="h-3 w-3" />
+              {formatFileSize(video.file_size)}
+            </span>
+          )}
+          <span>{formatRelativeTime(video.created_at)}</span>
         </div>
 
-        <div className="space-y-2">
-          <h3 className="font-medium line-clamp-1" title={video.filename}>
-            {video.filename}
-          </h3>
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            {video.duration_ms && (
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {Math.floor(video.duration_ms / 60000)}:{String(Math.floor((video.duration_ms % 60000) / 1000)).padStart(2, '0')}
-              </span>
-            )}
-            <span>{formatTimeAgo(video.created_at)}</span>
-          </div>
+        {video.source_url && (
+          <p className="text-xs text-muted-foreground/70 truncate" title={video.source_url}>
+            {t('videoCard.source')}: {video.source_url}
+          </p>
+        )}
 
-          {/* Progress for processing videos */}
-          {(video.status === 'downloading' || video.status === 'transcoding' ||
-            video.status === 'asr' || video.status === 'ocr' || video.status === 'indexing') && (
-            <Progress value={50} className="h-1.5" />
-          )}
-
-          {video.error_message && (
-            <p className="text-sm text-destructive line-clamp-1">{video.error_message}</p>
-          )}
-        </div>
+        {video.error_message && (
+          <p className="text-xs text-destructive line-clamp-1">{video.error_message}</p>
+        )}
 
         <div className="flex items-center justify-between pt-2 border-t">
-          <div className="flex gap-2">
-            <Link to={`/videos/${video.id}`}>
-              <Button variant="ghost" size="sm">
-                <Eye className="h-4 w-4" />
-              </Button>
-            </Link>
-            {video.status === 'ready' && (
-              <Link to={`/videos/${video.id}/progress`}>
-                <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
-                  {t('videoLibrary.progress')}
-                </Button>
-              </Link>
-            )}
-          </div>
+          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/videos/${video.id}`) }}>
+            <Eye className="h-3.5 w-3.5 mr-1" />
+            {t('videoLibrary.details')}
+          </Button>
           <Button
             variant="ghost"
-            size="sm"
-            onClick={(e) => { e.stopPropagation(); onDelete(video.id) }}
-            className="text-destructive hover:text-destructive"
+            size="icon"
+            disabled={isDeleting}
+            onClick={(e) => { e.stopPropagation(); onDelete(video) }}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             <Trash2 className="h-4 w-4" />
           </Button>
