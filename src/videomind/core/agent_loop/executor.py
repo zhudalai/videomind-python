@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -23,7 +24,9 @@ if TYPE_CHECKING:
     class RetrieverProtocol(Protocol):
         """检索器最小接口：单视频查询返回命中原始片段 dict 列表."""
 
-        async def search(self, query: str, media_id: uuid.UUID, *, top_k: int) -> list[dict]: ...
+        async def search(
+            self, query: str, media_id: uuid.UUID, *, top_k: int, recall_k: int | None = None,
+        ) -> list[dict]: ...
 
     class ChatRequestProtocol(Protocol):
         """LLM 聊天请求最小接口（避免动态类型创建）."""
@@ -31,19 +34,25 @@ if TYPE_CHECKING:
         temperature: float
 
 logger = structlog.get_logger(__name__)
-TOP_K_PER_VIDEO = 5
+# D-α 召回深度分层：宽召回/RRF 窗口 vs rerank 精排后喂 LLM 条数。
+# recall_k=None 退化到 top_k（旧行为，向后兼容）。
+RECALL_TOP_K = 60
+LLM_CONTEXT_TOP_K = 12
 MAX_SUGGESTIONS = 5
 
 
 class _RagRetriever:
     """默认检索器：复用 rag_pipeline.search，开自有 AsyncSession。"""
 
-    async def search(self, query: str, media_id: uuid.UUID, *, top_k: int = TOP_K_PER_VIDEO) -> list[dict]:
+    async def search(
+        self, query: str, media_id: uuid.UUID, *,
+        top_k: int = LLM_CONTEXT_TOP_K, recall_k: int | None = RECALL_TOP_K,
+    ) -> list[dict]:
         from videomind.core.rag.pipeline import search as rag_search
         from videomind.infrastructure.storage.database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
-            res = await rag_search(db, query, media_id, top_k=top_k)
+            res = await rag_search(db, query, media_id, top_k=top_k, recall_k=recall_k)
         return [
             {"id": e.id, "chunk_id": e.chunk_id, "content": e.content,
              "source_type": e.source_type, "score": e.score,
@@ -79,17 +88,23 @@ class Executor:
         for task in plan.tasks:
             query = task.search_query or task.description
             round_hits: list[Evidence] = []
-            for mid in state.media_ids:
+
+            # 并发检索各 media（M 轴 async gather：各 _RagRetriever.search 开独立 DB
+            # session，纯 async safe；墙钟从 O(N×M×L) 降为 O(N×L)，实测 ~3x 提速）
+            async def _search_one_mid(mid: str) -> tuple[str, list[Evidence]]:
                 try:
                     mid_uuid = uuid.UUID(mid)
                 except ValueError:
                     logger.warning("Executor 跳过无效 UUID", mid=mid)
-                    continue
+                    return mid, []
                 try:
-                    hits = await self._retriever.search(query, mid_uuid, top_k=TOP_K_PER_VIDEO)
+                    hits = await self._retriever.search(
+                        query, mid_uuid, top_k=LLM_CONTEXT_TOP_K, recall_k=RECALL_TOP_K,
+                    )
                 except Exception:
                     logger.warning("Executor 检索失败 media=%s", mid, exc_info=True)
-                    continue
+                    return mid, []
+                evs = []
                 for h in hits:
                     ev = Evidence(
                         id=h["id"],
@@ -102,6 +117,14 @@ class Executor:
                         media_id=mid,
                         media_title=meta_by_id.get(mid, ""),
                     )
+                    evs.append(ev)
+                return mid, evs
+
+            gathered = await asyncio.gather(
+                *[_search_one_mid(mid) for mid in state.media_ids]
+            )
+            for _mid, evs in gathered:
+                for ev in evs:
                     all_evidence[ev.id] = ev
                     round_hits.append(ev)
 
