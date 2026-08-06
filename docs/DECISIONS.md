@@ -11,7 +11,7 @@
 >
 > - 决策命名体系：`D-α` 召回深度分层、`D-β` rewriter 阈值、`P2-1` cross-encoder rerank opt-in、`P2-4` 通道级诊断、`P2-5` 设计阶段
 > - 权威来源：代码 docstring、commit message、`docs/superpowers/specs/`、评测 JSON、`~/.claude/projects/.../memory/`
-> - 最后更新：2026-08-06
+> - 最后更新：2026-08-07
 > - 関連ドキュメント：[ARCHITECTURE.md](ARCHITECTURE.md) · [RAG-RETRIEVAL.md](RAG-RETRIEVAL.md) · [AGENT-LOOP.md](AGENT-LOOP.md) · [INTENT-ROUTING.md](INTENT-ROUTING.md) · [MODEL-GATEWAY.md](MODEL-GATEWAY.md)
 
 ---
@@ -81,6 +81,18 @@
 | `ChatRequest.reasoning` 透传 | — | 透传：`reasoning` → `body {"reasoning":{"enabled":...}}` | ★ 66a1864（§3.9） |
 | 熔断失败阈值 | — | `failure_threshold=3` | 一致 |
 | `llm_first_packet_timeout_s` | — | 配置存在（10.0），当前未被主路径消费 | 见 §4 |
+
+### 2.5 视频管线 OCR（VIDEO-PIPELINE.md §2.4）
+
+| 维度 | 计划（docs） | 实际（代码） | 差异性质 |
+|---|---|---|---|
+| OCR 后端 | PaddleOCR 本地单路径 | `OCR_PROVIDER=local\|api` 双路径：local=PaddleOCR / api=ocr.space 远程 | ★ §3.12（解 py3.14 无 paddle wheel） |
+| `paddleocr`/`paddlepaddle` 依赖位置 | 主运行时依赖 | 移到 `[project.optional-dependencies].ocr` extras | ★ §3.12（解 uv sync 在 py3.14 整体解析失败） |
+| api 路径端点 | — | ocr.space `POST /parse/image`（`OCR_API_BASE_URL` 内部拼 `/parse/image`） | §3.12 |
+| api 引擎/语种 | — | `OCR_API_ENGINE` 1/2/3、`OCR_API_LANGUAGE` 三字母码（engine2/3 支持 `auto`） | §3.12 |
+| 帧去重 | 每帧识别 | phash 去重：同 phash 帧标 `[duplicate frame]` 不识别（local/api 共用 `_download_and_dedup`） | §3.12 |
+| `ocr_task` 异常降级 | — | 三档：`NotImplementedError`(known-skip 静默) / `ImportError`+其余 Exception(Error 级暴露真实原因，仍降级进 INDEX) | ★ §3.12（修静默吞 ImportError） |
+| `frame_ocr.model_name` | — | `paddle-ocr`（local）/ `ocr.space`（api） | §3.12 |
 
 ---
 
@@ -249,6 +261,33 @@
 
 **代码定位** — 设计权威 §9；memory：`stage-b-local-rerank-gpu-not-now`
 
+### 3.12 OCR 双路径 + 静默吞 ImportError 修复　★★
+
+**背景** — "OCR 模块似乎不起作用"。systematic-debugging（Phase 1 根因追溯）定位两层根因（任一即可让 OCR 全程空产且无报错表面化）：
+
+1. **依赖解析层**：项目无 `.python-version`，`requires-python = ">=3.11"` 无上界 → `uv` 自动选 `.venv` Python 3.14。`paddlepaddle` 仅有 `cp39–cp313` wheel、无 `cp314` → `uv sync` **整解析失败**（逆验证：`uv pip install --dry-run paddlepaddle` 报"only found wheels for cp39…cp313"）→ `.venv` 装 **0 包**（连 `httpx` 都无）。
+2. **错误处理层（放大器）**：`tasks.py` 的 `ocr_task` 原用一个 `except Exception` 把**所有异常含 ImportError** 统一降级成 `logger.warning(... results=[])`。"依赖缺失"被淹没在与"帧上无文字"完全同形的 WARNING 里 → 运行态看似正常、`frame_ocr` 表永不写入 → chunk 全 `source_type=asr` → "OCR 不起作用"且零报错。anaconda `base`（3.13.5）有 paddleocr 3.3.1（3.13≤cp313），反证 3.14 是断点。
+
+**决策** — 用户选 OCR 走 ocr.space 免费 API（key `K858…8957`），绕开本地 paddle 环境问题：
+
+| 改动 | 选型理由 |
+|---|---|
+| `OCR_PROVIDER=local\|api` 双路径 | 与 ASR/Embedding/rerank 双路径范式对齐，env 切后端不破契约 |
+| `_recognize_api` 对接 ocr.space `/parse/image` | 免费档 500 req/日/IP，无需本地重依赖，`base64Image + language + OCREngine + isOverlayRequired` 表单 |
+| `paddleocr`/`paddlepaddle` 移 `[project.optional-dependencies].ocr` 解 uv sync 卡死 | 主依赖留无 cp314 wheel 的包 → py3.14 整体解析失败装 0 包；进 extras 后 `uv sync`（api 路径）可成，本地走 `uv sync --extra ocr`（需 py≤3.13） |
+| 抽 `_download_and_dedup`（local/api 共用） | 消除双路径重复的"下载+phash 去重"逻辑，单一真源 |
+| `ocr_task` 异常三档（known-skip 静默 / `ImportError`+其余 Error 级暴露） | 修根因层放大器：不再用 `except Exception` 一刀切静默；真实依赖/未预期问题 Error 级浮出，known-skip（paddle PIR/oneDNN 上游 bug、api 缺 key）才静默 |
+| OAuth 端不改 tasks.py 之外的降级契约 | OCR 仍非关键路径——任一档都 `results=[]` 降级进 INDEX（视频已有 ASR 文本），只改"显隐"不改"是否继续" |
+
+**评测证据** — 不走 RAG eval，走**双轨冒烟**：
+1. **真实 ocr.space 端到端**：生产 `OCREngine`（`http_client=None` 走真 httpx、真 base64、真 phash、真网络）造中英混排图（"Sales 2026 销售额 +58% / 第二季度 Q2 revenue growth"）识别 → `model_name=ocr.space`、`frame_ms=0`、文字正确。证明 api 路径全链路契约走通。
+2. **7/7 单元测试**（mock httpx + mock MinIO）：成功解析 / 顶层错误降级 / 5xx 单帧降级不炸整批 / 重复帧去重不调 API / 空帧 / 缺 key 报 NotImplementedError / 多帧顺序。无任何基础设施依赖。
+- 反面佐证：切 `OCR_PROVIDER=api` 前无法识别（.venv 0 包）；切后端到端通→证明根因在依赖解析层而非 OCR 逻辑本身。
+
+**最终状态** — `.env` 开 `OCR_PROVIDER=api` + ocr.space key/engine/language/timeout；`config.py` 加 5 个 OCR API 配置项（默认 `OCR_API_BASE_URL=https://api.ocr.space`、`engine=2`、`language=auto`）；`paddleocr`/`paddlepaddle` 进 `ocr` extras；`ocr.py` 双路径 + 共用去重；`tasks.py` 三档异常不再静默吞 ImportError；`test_ocr_api.py` 7 用例覆盖 api 契约。本地路径保留为无网/配额耗尽时的后备（需 py≤3.13 + `uv sync --extra ocr`）。
+
+**代码定位** — `src/videomind/core/video_pipeline/ocr.py`（`_recognize_api` / `_download_and_dedup` / 三后端 model_name）、`src/videomind/config.py:85-93`（OCR API 配置）、`src/videomind/application/task_orchestration/tasks.py:468-485`（三档异常）、`pyproject.toml`（`ocr` extras）；新测试 `tests/core/video_pipeline/test_ocr_api.py`；memory：`asr-quality-local-turbo-gpu`（同族双路径范式参照）
+
 ---
 
 ## 4. 尚未落地 / 已简化的计划项 / Deferred or Simplified
@@ -266,6 +305,7 @@
 | **CrossEncoder `0.7*det+0.3*ce` 融合 + cuda 默认** | RAG-RETRIEVAL §2.6 | 改设计 | 见 §3.3，改纯 cross-encoder 分 + min-max 归一 |
 | **`llm_first_packet_timeout_s` 首包超时** | MODEL-GATEWAY | 未消费 | 配置存在（10.0），当前主路径未消费 |
 | **意图树 yaml 文件化** | INTENT-ROUTING §2 | 实现选择 | 改代码内 `DEFAULT_INTENT_TREE` 常量，少一个文件依赖 |
+| **本地 OCR（PaddleOCR）作为默认主依赖** | VIDEO-PIPELINE §2.4 | 降为可选 | `paddleocr`/`paddlepaddle` 移 `ocr` extras（无 cp314 wheel，放主依赖使 py3.14 `uv sync` 整体解析失败）；默认走 `OCR_PROVIDER=api`（ocr.space），本地 OCR 需 `uv sync --extra ocr`（py≤3.13）。见 §3.12 |
 
 > 说明：以上"未实现"项若有重启需求，对应设计文档章节仍为权威 specs，无需重新设计。
 
@@ -278,9 +318,9 @@
 | D-α / D-β / P2-5 设计 | `docs/superpowers/specs/2026-08-04-retrieval-depth-tuning-design.md` |
 | P2-4 诊断脚本 | `scripts/eval/diag_retrieval.py` / `eval_queryrewriter.py` |
 | 评测结果 JSON | `results_off_api_topk20_recallk60.json` / `results_queryrewriter.json` |
-| 代码内决策记录 | `rewriter.py:54-62`（D-β）、`executor.py:37-41`（D-α）、`pipeline.py:37-117`（顺序/分层/归一）、`rerank_backend.py:1-19`（P2-1） |
+| 代码内决策记录 | `rewriter.py:54-62`（D-β）、`executor.py:37-41`（D-α）、`pipeline.py:37-117`（顺序/分层/归一）、`rerank_backend.py:1-19`（P2-1）、`ocr.py`（§3.12 OCR 双路径）、`tasks.py:468-485`（§3.12 三档异常） |
 | Commit 序列 | `0ebf246`(D-β硬改) → `66a1864`(reasoning透传) → `8b7f478`(D-β回滚) → `16e8638`(并发检索:D-α) → `910695a`(max_rounds/media_ids) → `6059abc`(D-α分层+双路径重排) |
-| 持久记忆 | `~/.claude/projects/d--shu-e-Documents-Video-MInd-python/memory/`（`rag-pipeline-rerank-expand-order` / `rag-cross-encoder-rerank` / `rewriter-threshold-not-cure` / `bm25-cjk-tokenize` / `stage-b-local-rerank-gpu-not-now` 等） |
+| 持久记忆 | `~/.claude/projects/d--shu-e-Documents-Video-MInd-python/memory/`（`rag-pipeline-rerank-expand-order` / `rag-cross-encoder-rerank` / `rewriter-threshold-not-cure` / `bm25-cjk-tokenize` / `stage-b-local-rerank-gpu-not-now` / `asr-quality-local-turbo-gpu` 等） |
 
 ---
 
