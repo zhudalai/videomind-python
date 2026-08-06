@@ -466,13 +466,25 @@ def ocr_task(self, context: dict) -> dict:
                             uuid.UUID(ctx.media_id), tc["keyframes_minio"]
                         )
         except NotImplementedError as e:
-            # PaddlePaddle 3.x on CPU + oneDNN: PIR ArrayAttribute<pir::DoubleAttribute>
-            # 转换未实现 —— 已知上游缺陷，暂以"OCR 跳过"降级，pipeline 仍可进入 INDEX。
-            logger.warning("OCR 阶段因 PaddlePaddle PIR/oneDNN 上游 bug 跳过: %s", e)
+            # 已知跳过条件（非程序错误）：paddle PIR/oneDNN 上游 bug，或 OCR_PROVIDER=api 缺 key。
+            # OCR 以空结果降级，pipeline 仍可进入 INDEX（OCR 非关键路径，视频已有 ASR 文本）。具体原因见 e。
+            logger.warning("OCR 阶段按已知跳过条件降级: %s", e)
+            results = []
+        except ImportError as e:
+            # 缺本地 OCR 依赖（未 `uv sync --extra ocr` / py3.14 无 paddle wheel；ModuleNotFoundError 亦然）。
+            # 不再静默吞——这是"OCR 不起作用且无报错表面化"的根因放大器（见 DECISIONS.md §3.12）：
+            # 原先此处一个 `except Exception` 把 ImportError 当普通降级降成 WARNING，与"帧上无文字"
+            # 不可区分，掩盖真实依赖问题。现 Error 级暴露 + 给修复路径；OCR 非关键，仍降级进 INDEX。
+            logger.error(
+                "OCR 缺依赖跳过（已暴露）: %s: %s | 修复：OCR_PROVIDER=api 走 ocr.space，"
+                "或 `uv sync --extra ocr`（需 py≤3.13 装 paddle）。",
+                type(e).__name__, e,
+            )
             results = []
         except Exception as e:
-            # 其他 OCR 错误也降级 —— OCR 非关键路径（视频本身已有 ASR 文本）
-            logger.warning("OCR 阶段异常降级: %s: %s", type(e).__name__, e)
+            # 未预期的 OCR 错误——Error 级暴露真实原因，不再静默（静默曾掩盖依赖缺失被当 known-skip）。
+            # OCR 非关键路径（视频已有 ASR 文本），降级 results=[] 让 pipeline 继续，但不掩盖。
+            logger.error("OCR 阶段异常降级（非 known-skip，已暴露）: %s: %s", type(e).__name__, e)
             results = []
 
         async with db_session() as db:

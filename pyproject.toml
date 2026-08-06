@@ -39,8 +39,8 @@ dependencies = [
     # AI 推理（双路径：API + 本地）
     "httpx>=0.27.0",                 # API 路径 HTTP 客户端
     "faster-whisper>=1.0.3",         # 本地 ASR 路径 (CTranslate2)
-    "paddleocr>=2.8.0",              # 本地 OCR 路径
-    "paddlepaddle>=2.6.0",
+    # 本地 OCR 路径：paddleocr/paddlepaddle 见 [project.optional-dependencies].ocr
+    # paddle 无 cp314 wheel → 放 extras，否则 uv sync 在 py3.14 解析失败（0 包装不上）
     "sentence-transformers>=3.2.0",  # 本地 Embedding 路径
     "rank-bm25>=0.2.2",             # RAG BM25 关键词检索
     "jieba>=0.42.1",                # CJK 分词（BM25 中文/日文检索混合分词）
@@ -73,6 +73,13 @@ dev = [
 ]
 gpu = [
     "torch>=2.4.0",
+]
+# 本地 OCR 路径（OCR_PROVIDER=local）：paddlepaddle wheel 仅 cp39–cp313，
+# Python 3.14 无 wheel → 放 extras 避免主依赖解析失败（uv sync 卡死、装 0 包）。
+# 装法：uv sync --extra ocr（需 Python ≤3.13）；不装则走 OCR_PROVIDER=api（ocr.space）
+ocr = [
+    "paddleocr>=2.8.0",
+    "paddlepaddle>=2.6.0",
 ]
 
 [project.urls]

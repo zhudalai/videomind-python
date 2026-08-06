@@ -82,8 +82,15 @@ class Settings(BaseSettings):
     asr_api_key: str = ""
     # ASR API 模型名（默认 Groq 上的 whisper-large-v3-turbo，与本地档位一致以便对比）
     asr_api_model: str = "whisper-large-v3-turbo"
-    ocr_api_base_url: str = ""
+    ocr_api_base_url: str = "https://api.ocr.space"
     ocr_api_key: str = ""
+    # ocr.space OCREngine：1=最快 / 2=balanced+auto-detect(默认) / 3=最高精度200+语配额低
+    ocr_api_engine: int = 2
+    # ocr.space language 三字母码：auto(engine2/3 自动检测) / chs / eng / jpn ...
+    # OCR_LANG=ch 是本地 paddle 码，api 路径独立取此三字母码；默认 auto 省语种猜测
+    ocr_api_language: str = "auto"
+    # OCR API 单帧请求超时（ocr.space 单帧常 1-5s + 网络，留余量）
+    ocr_timeout_s: float = 60.0
     embedding_api_base_url: str = ""
     embedding_api_key: str = ""
     embedding_api_model: str = ""
