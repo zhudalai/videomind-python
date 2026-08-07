@@ -53,6 +53,8 @@ dependencies = [
     "opentelemetry-instrumentation-redis>=0.48b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
     "opentelemetry-instrumentation-celery>=0.48b0",
+    # tracing.py 用 LoggingInstrumentor 配置结构化日志格式（漏声明则 import 时刻炸、靠 anaconda 残留遮）
+    "opentelemetry-instrumentation-logging>=0.48b0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
     # 工具
     "structlog>=24.4.0",

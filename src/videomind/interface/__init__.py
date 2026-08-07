@@ -4,13 +4,10 @@
 生命周期：启动 → 连接基础设施 → 挂载路由 → 监听；关闭 → 断开连接池。
 
 使用方式:
-    uv run uvicorn videomind.interface.app:app --reload
+    uv run uvicorn videomind.interface:app --reload
 """
 
 from __future__ import annotations
-
-import sys
-print(f"[INIT] loading videomind.interface from {__file__}", file=sys.stderr)
 
 from contextlib import asynccontextmanager
 

@@ -264,7 +264,7 @@ docker compose -f docker/docker-compose.yml up -d
 alembic upgrade head
 
 # 6. 启动 API 服务 / Start API
-uv run uvicorn videomind.interface.app:app --reload --port 8011
+uv run uvicorn videomind.interface:app --reload --port 8011
 
 # 7. 启动 Celery Worker（新终端）/ Start Celery workers (new terminal)
 #    Windows 必须 -P solo（prefork 在 Win 上 _loc race 卡死）
@@ -303,7 +303,7 @@ docker compose -f docker/docker-compose.yml up -d
 alembic upgrade head
 
 # 6. Start API
-uv run uvicorn videomind.interface.app:app --reload --port 8011
+uv run uvicorn videomind.interface:app --reload --port 8011
 
 # 7. Start Celery workers (new terminal)
 #    On Windows you MUST use -P solo (prefork hits a _loc race and hangs)
@@ -342,7 +342,7 @@ docker compose -f docker/docker-compose.yml up -d
 alembic upgrade head
 
 # 6. API サービス起動 / Start API
-uv run uvicorn videomind.interface.app:app --reload --port 8011
+uv run uvicorn videomind.interface:app --reload --port 8011
 
 # 7. Celery Worker 起動（新規ターミナル）/ Start Celery workers (new terminal)
 #    Windows では -P solo 必須（prefork は Win 上で _loc race してハング）
@@ -371,7 +371,7 @@ npm run dev
 | 变量 / Variable | 取值 / Values | 说明 / Description |
 |---|---|---|
 | `ASR_PROVIDER` | `local` \| `api` | local=faster-whisper，api=Groq 转写 |
-| `OCR_PROVIDER` | `local` \| `api` | local=PaddleOCR，api=外部 OCR |
+| `OCR_PROVIDER` | `local` \| `api` | local=PaddleOCR（需 `uv sync --extra ocr`+py≤3.13），api=ocr.space |
 | `EMBEDDING_PROVIDER` | `local` \| `api` | local=sentence-transformers，api=ollama/openai |
 | `ASR_MODEL` | `tiny`/`small`/`...`/`large-v3-turbo` | 本地档位；想要 top 质量需装 CUDA |
 | `ASR_DEVICE` | `auto`/`cuda`/`cpu` | 无 CUDA 库时用 cpu |
@@ -396,7 +396,7 @@ Config is injected from `.env` via pydantic-settings v2; see the template at [.e
 | Variable | Values | Description |
 |---|---|---|
 | `ASR_PROVIDER` | `local` \| `api` | local=faster-whisper; api=Groq transcription |
-| `OCR_PROVIDER` | `local` \| `api` | local=PaddleOCR; api=external OCR |
+| `OCR_PROVIDER` | `local` \| `api` | local=PaddleOCR (needs `uv sync --extra ocr`, py≤3.13); api=ocr.space |
 | `EMBEDDING_PROVIDER` | `local` \| `api` | local=sentence-transformers; api=ollama/openai |
 | `ASR_MODEL` | `tiny`/`small`/`...`/`large-v3-turbo` | Local tier; top quality needs CUDA |
 | `ASR_DEVICE` | `auto`/`cuda`/`cpu` | Use `cpu` without CUDA libs |
@@ -421,7 +421,7 @@ Config is injected from `.env` via pydantic-settings v2; see the template at [.e
 | 変数 / Variable | 値 / Values | 説明 / Description |
 |---|---|---|
 | `ASR_PROVIDER` | `local` \| `api` | local=faster-whisper、api=Groq 転写 |
-| `OCR_PROVIDER` | `local` \| `api` | local=PaddleOCR、api=外部 OCR |
+| `OCR_PROVIDER` | `local` \| `api` | local=PaddleOCR（`uv sync --extra ocr`+py≤3.13）、api=ocr.space |
 | `EMBEDDING_PROVIDER` | `local` \| `api` | local=sentence-transformers、api=ollama/openai |
 | `ASR_MODEL` | `tiny`/`small`/`...`/`large-v3-turbo` | ローカル階層；最高品質には CUDA 必須 |
 | `ASR_DEVICE` | `auto`/`cuda`/`cpu` | CUDA ライブラリなし時は `cpu` |
