@@ -103,12 +103,13 @@ async def upload_video_file(
       4) 分发 pipeline_task(media_id, source_url='', skip_download=True,
          content_hash, minio_bucket, minio_object, source_type='upload')
 
-    限制：单文件 max 2 GiB（FastAPI 默认 spool 阈值兜底）；服务端具体 ephemeral 配置
-    见 deployment 文档。
+    流式化（1.5）：1MB 分块写临时文件（不再整文件进内存），超 UPLOAD_MAX_MB
+    （默认 500MB）在收包途中即断 413；任意失败路径 finally 清理临时文件。
     """
     import hashlib
-    import io
     import logging
+    import tempfile
+    from pathlib import Path
 
     from videomind.infrastructure.storage.repository import (
         create_media_file_from_upload,
@@ -119,15 +120,8 @@ async def upload_video_file(
     settings = get_settings()
     bucket = settings.minio_bucket
 
-    # 读完整内容到内存（生产环境可换分块 + SpooledTemporaryFile；2GB 内测试够用）
-    content = await file.read()
-    size = len(content)
-    if size == 0:
-        raise HTTPException(status_code=400, detail="上传文件为空")
-
-    content_hash = hashlib.sha256(content).hexdigest()
-
-    # 文件扩展：从 filename 推断；缺失/异常时取 .mp4 兜底
+    # 文件扩展：从 filename 推断；缺失/异常时取 .mp4 兜底。
+    # 流式写盘前先定扩展名——临时文件名带扩展，MinIO fput_object 按扩展名推断 content_type
     raw_name = (file.filename or "upload.mp4").strip()
     safe_name = raw_name.replace("/", "_").replace("\\", "_")[:255] or "upload.mp4"
     if "." in safe_name:
@@ -136,67 +130,100 @@ async def upload_video_file(
         ext = "mp4"
     if not ext.isalnum():
         ext = "mp4"
-
-    object_key = f"videos/{content_hash}/original.{ext}"
     mime = file.content_type or "video/mp4"
 
-    # 1) 推到 MinIO（幂等：同 content_hash 同 object_key，重复上传是覆盖语义，bytes 一致）
+    # 1.5 流式落盘：1MB 分块读 → 临时文件 + 增量 SHA256，替换旧 `await file.read()`
+    # 整文件进内存——大上传 = API 进程等量 RSS 峰值，几个并发直接 OOM。
+    # 超限在收包途中即断 413（不把整文件收完才拒绝）；finally 保证任意路径临时文件都被清
+    max_bytes = int(settings.upload_max_mb * (1 << 20))
+    chunk_size = 1 << 20
+    hasher = hashlib.sha256()
+    size = 0
+    tmp_path = Path(tempfile.gettempdir()) / f"upload_{uuid.uuid4().hex}.{ext}"
     try:
-        minio = get_minio_client()
-        await minio.ensure_bucket()
-        await minio.upload_bytes(object_key, content, mime)
-    except Exception as e:
-        log.exception("upload_bytes failed: %s", e)
-        raise HTTPException(
-            status_code=502,
-            detail=f"MinIO upload failed: {type(e).__name__}",
-        ) from e
+        with open(tmp_path, "wb") as out:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件超过上传上限 {settings.upload_max_mb:g}MB",
+                    )
+                hasher.update(chunk)
+                out.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=400, detail="上传文件为空")
+        content_hash = hasher.hexdigest()
 
-    # 2) 落库 media_file（幂等 by content_hash）
-    try:
-        async with AsyncSessionLocal() as session:
-            media = await create_media_file_from_upload(
-                session,
-                content_hash=content_hash,
-                filename=safe_name,
-                mime_type=mime,
-                file_size=size,
-                bucket=bucket,
-                object_key=object_key,
-            )
-            await session.commit()
-    except Exception as e:
-        log.exception("create_media_file_from_upload failed: %s", e)
-        # 补偿：清理刚上传的对象避免遗留垃圾
+        object_key = f"videos/{content_hash}/original.{ext}"
+
+        # 1) 推到 MinIO（幂等：同 content_hash 同 object_key，重复上传是覆盖语义，bytes 一致）
+        #    upload_file 走 fput_object 从临时文件流式上传，同样不进内存
         try:
-            await minio.delete(object_key)
-        except Exception:
-            pass
-        raise HTTPException(
-            status_code=500, detail=f"DB upsert failed: {type(e).__name__}"
-        ) from e
+            minio = get_minio_client()
+            await minio.ensure_bucket()
+            await minio.upload_file(object_key, tmp_path)
+        except Exception as e:
+            log.exception("upload_file failed: %s", e)
+            raise HTTPException(
+                status_code=502,
+                detail=f"MinIO upload failed: {type(e).__name__}",
+            ) from e
 
-    # 3) 触发管线：skip_download=True → download_video_task 走 MinIO materialize 分支
-    context = {
-        "media_id": str(media.id),
-        "source_url": "",
-        "user_id": None,
-        "skip_download": True,
-        "source_type": "upload",
-        "content_hash": content_hash,
-        "minio_bucket": bucket,
-        "minio_object": object_key,
-        "upload_filename": safe_name,
-    }
-    try:
-        pipeline_task.apply_async(args=[context], queue="cpu")
-    except Exception as e:
-        log.warning(
-            "Celery dispatch 失败，media=%s 已落库但未入队；前端仍可轮询 status: %s",
-            media.id,
-            e,
-        )
-        # 不回滚 media_file，让前端从 progress 页可看到 pending 状态、由监控/manual 重发
+        # 2) 落库 media_file（幂等 by content_hash）
+        try:
+            async with AsyncSessionLocal() as session:
+                media = await create_media_file_from_upload(
+                    session,
+                    content_hash=content_hash,
+                    filename=safe_name,
+                    mime_type=mime,
+                    file_size=size,
+                    bucket=bucket,
+                    object_key=object_key,
+                )
+                await session.commit()
+        except Exception as e:
+            log.exception("create_media_file_from_upload failed: %s", e)
+            # 补偿：清理刚上传的对象避免遗留垃圾
+            try:
+                await minio.delete(object_key)
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=500, detail=f"DB upsert failed: {type(e).__name__}"
+            ) from e
+
+        # 3) 触发管线：skip_download=True → download_video_task 走 MinIO materialize 分支
+        context = {
+            "media_id": str(media.id),
+            "source_url": "",
+            "user_id": None,
+            "skip_download": True,
+            "source_type": "upload",
+            "content_hash": content_hash,
+            "minio_bucket": bucket,
+            "minio_object": object_key,
+            "upload_filename": safe_name,
+        }
+        try:
+            pipeline_task.apply_async(args=[context], queue="cpu")
+        except Exception as e:
+            log.warning(
+                "Celery dispatch 失败，media=%s 已落库但未入队；前端仍可轮询 status: %s",
+                media.id,
+                e,
+            )
+            # 不回滚 media_file，让前端从 progress 页可看到 pending 状态、由监控/manual 重发
+    finally:
+        # 临时文件必清：成功路径上传完即无价值，失败路径防残留在 tempdir 无限堆积
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            log.warning("清理上传临时文件失败（忽略）: %s", tmp_path)
 
     return {
         "media_id": media.id,
@@ -541,6 +568,12 @@ async def delete_video(
 
     await db.delete(media)
     await db.commit()
+
+    # 1.3：媒体删除 → 失效引用它的 RAG 语义缓存条目（不等 6h TTL，
+    # 防命中"幽灵视频"答案；函数内部 fail-open，失效失败不阻断删除响应）
+    from videomind.core.rag.semantic_cache import invalidate_semantic_cache_for_media
+    await invalidate_semantic_cache_for_media(media_id)
+
     return Response(status_code=204)
 
 

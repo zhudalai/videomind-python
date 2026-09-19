@@ -8,21 +8,23 @@ GET  /api/agent/tasks/{task_id}/checkpoints → 获取断点恢复数据（每�
 后端复用既有 core/agent_loop（Planner→Executor→Critic 闭环）+ 持久化模型
 AnalysisTask / AgentCheckpoint / AgentResult（见 infrastructure/storage/models.py）。
 
-运行模型：FastAPI BackgroundTasks 在同一进程内异步跑 AgentLoop，边跑边更新
-AnalysisTask 行（status / current_round / final_result_json / started_at /
-completed_at / error_message），并写 AgentCheckpoint 与最终 AgentResult。
-前端用 task_id 轮询状态机直到 completed/failed。不依赖额外 Celery worker，
-足以端到端跑通；后续可平迁到 Celery 而不动接口。
+运行模型（1.4 已迁 Celery）：dispatch agent_analyze_task 到 cpu 队列，worker 进程
+内跑 agent_runner.run_agent_analysis，边跑边更新 AnalysisTask 行
+（status / current_round / final_result_json / started_at / completed_at /
+error_message），并写 AgentCheckpoint 与最终 AgentResult。前端用 task_id 轮询
+状态机直到 completed/failed（接口/轮询与迁移前完全不变）。相比旧 BackgroundTasks
+方案：API 进程重启不丢任务、重活不占 HTTP worker。运行体见
+application/task_orchestration/agent_runner.py。
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -32,6 +34,7 @@ from videomind.infrastructure.storage import models as m
 from videomind.infrastructure.storage.database import AsyncSessionLocal, get_db
 
 router = APIRouter(tags=["agent"], prefix="/agent")
+log = logging.getLogger(__name__)
 
 
 # ──────────────────────────── Pydantic Schema ────────────────────────────
@@ -83,9 +86,9 @@ class AgentResultResponse(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID
     title: str
-    conclusions_json: list[Any]
-    evidence_json: list[Any]
-    suggestions_json: list[Any] | None
+    conclusions_json: list
+    evidence_json: list
+    suggestions_json: list | None
     critic_passed: bool
     critic_feedback: str | None
     total_rounds: int
@@ -100,8 +103,8 @@ class AgentResultResponse(BaseModel):
 
 
 @router.post("/analyze", response_model=AnalyzeResponse, status_code=202)
-async def analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks) -> AnalyzeResponse:
-    """发起 Agent 分析任务，立即返回 task_id；后台异步运行 AgentLoop。
+async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
+    """发起 Agent 分析任务，立即返回 task_id；Celery cpu 队列异步运行 AgentLoop。
 
     幂等：同 (media_ids_hash, goal_hash) 已有未失败任务时复用，不重复启跑。
     """
@@ -166,13 +169,28 @@ async def analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks) -> Ana
                         task_id=task.id, media_id=mid, position=pos))
                 await session.commit()
 
-        # 仅新任务才调度后台运行
+        # 仅新任务才调度运行（1.4：BackgroundTasks → Celery cpu 队列；
+        # uuid 一律转 str——Celery 参数走 JSON 序列化）
         if task.status == "pending":
-            background_tasks.add_task(
-                _run_agent_loop,
-                task_id=task.id, goal=req.goal,
-                media_ids=list(req.media_ids), max_rounds=req.max_rounds,
-            )
+            from videomind.application.task_orchestration.tasks import agent_analyze_task
+
+            try:
+                agent_analyze_task.apply_async(
+                    args=[{
+                        "task_id": str(task.id),
+                        "goal": req.goal,
+                        "media_ids": [str(x) for x in req.media_ids],
+                        "max_rounds": req.max_rounds,
+                    }],
+                    queue="cpu",
+                )
+            except Exception as e:  # noqa: BLE001
+                # dispatch 失败不回滚任务行：保留 pending 终态可由监控/手动重发
+                # （与 video.py 管线 dispatch 的兜底策略一致）
+                log.warning(
+                    "Agent 任务 dispatch 失败，task=%s 已落库 pending 可手动重发: %s",
+                    task.id, e,
+                )
 
         return AnalyzeResponse(
             task_id=task.id, status=task.status, goal=task.goal,
@@ -243,169 +261,3 @@ async def get_task_checkpoints(task_id: uuid.UUID, db: AsyncSession = Depends(ge
         }
         for c in checkpoints
     ]
-
-
-# ──────────────────────────── 后台运行器 ────────────────────────────
-
-
-async def _load_video_meta(media_ids: list[uuid.UUID]) -> list[Any]:
-    """加载各 video 的 filename/duration_ms，供 Planner/Executor 上下文渲染来源."""
-    from videomind.core.agent_loop.types import VideoMeta
-
-    meta: list[VideoMeta] = []
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(m.MediaFile).where(m.MediaFile.id.in_(media_ids))
-        )
-        for media in result.scalars().all():
-            meta.append(VideoMeta(
-                media_id=str(media.id), filename=media.filename,
-                duration_ms=media.duration_ms))
-    return meta
-
-
-async def _run_agent_loop(
-    *,
-    task_id: uuid.UUID,
-    goal: str,
-    media_ids: list[uuid.UUID],
-    max_rounds: int,
-) -> None:
-    """后台协程：跑 AgentLoop 并把状态/结果/断点写回 DB。
-
-    每个阶段（planning/executing/critic_check）落一条 AgentCheckpoint；
-    Critique 通过即落 AgentResult 并把 status 置 completed。任意异常 → status=failed。
-    """
-    from videomind.core.agent_loop.factory import get_agent_loop
-    from videomind.core.agent_loop.types import AgentState
-
-    try:
-        loop = get_agent_loop()
-        video_meta = await _load_video_meta(media_ids)
-
-        async with AsyncSessionLocal() as session:
-            task = await session.get(m.AnalysisTask, task_id)
-            assert task is not None
-            task.status = "planning"
-            task.started_at = datetime.now(timezone.utc)
-            await session.commit()
-
-        state = AgentState(
-            goal=goal,
-            media_ids=[str(x) for x in media_ids],
-            video_meta=video_meta,
-        )
-
-        # 使用单一数据库会话贯穿整个 AgentLoop
-        async with AsyncSessionLocal() as session:
-            for round_num in range(1, max_rounds + 1):
-                state.round = round_num
-                t = await session.get(m.AnalysisTask, task_id)
-                if t:
-                    t.status = "planning"
-                    t.current_round = round_num
-                    await session.commit()
-                state.plan = await loop._planner.plan(state, session)
-                await _checkpoint(task_id, round_num, "planning", state)
-
-                t = await session.get(m.AnalysisTask, task_id)
-                if t:
-                    t.status = "executing"
-                    await session.commit()
-                state.result = await loop._executor.execute(state, session)
-                await _checkpoint(task_id, round_num, "executing", state)
-
-                t = await session.get(m.AnalysisTask, task_id)
-                if t:
-                    t.status = "critic_check"
-                    await session.commit()
-                state.critique = await loop._critic.critique(state, session)
-                await _checkpoint(task_id, round_num, "critic_check", state)
-
-                if state.critique.passed:
-                    break
-
-            result = state.result
-            t = await session.get(m.AnalysisTask, task_id)
-            assert t is not None
-            if result and result.title:
-                ar = m.AgentResult(
-                    task_id=task_id, title=result.title,
-                    conclusions_json=[_dataclass_to_dict(c) for c in result.conclusions],
-                    evidence_json=[_dataclass_to_dict(e) for e in result.evidence],
-                    suggestions_json=list(result.suggestions) or None,
-                    critic_passed=bool(state.critique and state.critique.passed),
-                    critic_feedback=state.critique.feedback if state.critique else None,
-                    total_rounds=state.round, token_usage=None,
-                )
-                session.add(ar)
-                t.final_result_json = {"title": result.title,
-                    "conclusions": len(result.conclusions), "evidence": len(result.evidence),
-                    "suggestions": len(result.suggestions)}
-                t.status = "completed"
-            else:
-                t.status = "failed"
-                t.error_message = "AgentLoop 未产生有效结果（空 AnalysisResult / 零命中）"
-            t.completed_at = datetime.now(timezone.utc)
-            await session.commit()
-
-    except Exception as exc:  # noqa: BLE001
-        async with AsyncSessionLocal() as session:
-            t = await session.get(m.AnalysisTask, task_id)
-            if t:
-                t.status = "failed"
-                t.error_message = f"{type(exc).__name__}: {exc}"
-                t.completed_at = datetime.now(timezone.utc)
-                await session.commit()
-
-
-async def _checkpoint(
-    task_id: uuid.UUID,
-    round_num: int,
-    phase: str,
-    state: Any,
-) -> None:
-    """落一条 AgentCheckpoint（每轮每阶段各一次）。
-
-    uq_acp_task_round_phase 唯一约束保证同一 (task, round, phase) 不重复；
-    本调用方已按 planning→executing→critic_check 各写一次，无冲突。
-    """
-    try:
-        async with AsyncSessionLocal() as session:
-            cp = m.AgentCheckpoint(
-                task_id=task_id,
-                round=round_num,
-                phase=phase,
-                agent_state_json={
-                    "goal": state.goal,
-                    "round": state.round,
-                    "has_plan": state.plan is not None,
-                    "has_result": state.result is not None,
-                    "has_critique": state.critique is not None,
-                },
-                video_context_ref={
-                    "media_ids": list(state.media_ids),
-                    "retrieved_evidence_count": len(state.retrieved_evidence_ids),
-                    "round": state.round,
-                },
-                plan_json=_dataclass_to_dict(state.plan) if state.plan else None,
-                critique_json=_dataclass_to_dict(state.critique) if state.critique else None,
-                result_json=_dataclass_to_dict(state.result) if state.result else None,
-                feedback=state.critique.feedback if state.critique else None,
-            )
-            session.add(cp)
-            await session.commit()
-    except Exception:
-        # 断点写入失败不应阻断主循环
-        pass
-
-
-def _dataclass_to_dict(obj: Any) -> dict | None:
-    """把 dataclass 转 dict（递归处理嵌套 dataclass / list）。"""
-    if obj is None:
-        return None
-    if isinstance(obj, list):
-        return [_dataclass_to_dict(x) for x in obj]
-    if hasattr(obj, "__dataclass_fields__"):
-        return {k: _dataclass_to_dict(getattr(obj, k)) for k in obj.__dataclass_fields__}
-    return obj

@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from videomind.core.rag import pipeline as rag_pipeline
+from videomind.core.rag.semantic_cache import semantic_cache_lookup, semantic_cache_store
 from videomind.infrastructure.storage import models as m
 from videomind.infrastructure.storage.database import get_db
 
@@ -54,6 +55,7 @@ class RagChatResponse(BaseModel):
     answer: str
     evidence: list[RagSearchResultItem]
     session_id: str
+    cached: bool = Field(False, description="true=语义缓存命中（跳过改写/检索/LLM 全链路）")
 
 
 # ──────────────────────────── Routes ────────────────────────────
@@ -129,6 +131,19 @@ async def rag_chat(req: RagChatRequest, db: AsyncSession = Depends(get_db)) -> R
             "duration_sec": (media.duration_ms // 1000) if media.duration_ms else None,
         }
 
+    # 0.5 语义缓存查询（1.3）：命中直接返回，跳过改写/检索/LLM 全链路。
+    #     L1 精确匹配零嵌入成本；L2 命中省整条 RAG 链路（检索 + rerank + LLM 生成）。
+    #     未命中时返回的 query_vec 是 L2 probe 已算的嵌入，回源后传给 store 复用。
+    #     media_ids 一致是命中硬约束（同问题不同视频集答案不同），缓存内部按桶隔离。
+    cache_hit, query_vec = await semantic_cache_lookup(req.query, targets)
+    if cache_hit is not None:
+        return RagChatResponse(
+            answer=cache_hit.answer,
+            evidence=[RagSearchResultItem(**e) for e in cache_hit.evidence],
+            session_id=(str(req.session_id) if req.session_id else str(uuid.uuid4())),
+            cached=True,
+        )
+
     # 1. 查询改写（intent QueryRewriter）—— fail-open，失败回退原始 query
     queries: list[str] = [req.query]
     intent_path: dict | None = None
@@ -193,6 +208,7 @@ async def rag_chat(req: RagChatRequest, db: AsyncSession = Depends(get_db)) -> R
 
     # 3. 拼证据 context，调 LLM 生成回答（生成失败则回退证据拼接）
     answer = ""
+    degraded = False
     try:
         from videomind.core.model_gateway.factory import get_llm_service
         from videomind.core.model_gateway.types import ChatRequest
@@ -222,9 +238,15 @@ async def rag_chat(req: RagChatRequest, db: AsyncSession = Depends(get_db)) -> R
         resp = await llm.chat(ChatRequest(messages=messages, temperature=0.3), db)
         answer = resp.content
     except Exception as exc:  # noqa: BLE001 —— LLM 失败不阻断，回退证据摘要仍可交付
+        degraded = True
         answer = f"（LLM 生成失败：{type(exc).__name__}，以下为检索证据摘要）\n\n" + "\n\n".join(
             f"[{e['evidence_id']}] {e['content'][:200]}" for e in top if e.get("evidence_id")
         )
+
+    # 4. 写语义缓存：仅正常生成（非降级、有证据）入缓存——降级文本/空证据占着
+    #    LRU 位，下次命中反而交付劣质答案。store 内部 fail-open，失败不影响响应。
+    if not degraded and top:
+        await semantic_cache_store(req.query, targets, query_vec, answer, top)
 
     return RagChatResponse(
         answer=answer,

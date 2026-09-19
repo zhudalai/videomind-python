@@ -116,6 +116,19 @@ RAG_ANSWER_LATENCY = Histogram(
     buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
 )
 
+# ──────────────────────────── RAG 语义缓存指标（1.2）────────────────────────────
+
+RAG_CACHE_HITS = Counter(
+    "videomind_rag_cache_hits_total",
+    "RAG 语义缓存命中总数（跳过检索+生成，直接返回缓存答案）",
+    ["hit_type"],  # exact=规范化精确匹配 / semantic=向量近邻匹配
+)
+
+RAG_CACHE_MISSES = Counter(
+    "videomind_rag_cache_misses_total",
+    "RAG 语义缓存未命中总数（回源完整 RAG 链路）",
+)
+
 # ──────────────────────────── LLM 调用指标 ────────────────────────────
 
 LLM_CALL_TOTAL = Counter(

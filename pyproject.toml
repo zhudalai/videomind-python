@@ -72,6 +72,9 @@ dev = [
     "ruff>=0.7.0",
     "mypy>=1.13.0",
     "types-redis",
+    # tests/core/video_pipeline/test_embed.py 属性测试在用；此前未声明，
+    # 换环境即 ImportError（uv sync --extra dev 一次补齐）
+    "hypothesis>=6.100.0",
 ]
 gpu = [
     "torch>=2.4.0",
@@ -108,6 +111,17 @@ markers = [
     "e2e: 需要真实基础设施的端到端测试",
     "infra: 需要真实基础设施的集成测试",
 ]
+
+# ───────────────────────── 覆盖率（方向 2：core 层 80% 门槛）─────────────────────────
+# 统计口径：core 层（业务核心：数据清洗/chunking/检索），branch 分支覆盖。
+# 门槛在 CI 里由 --cov-fail-under=80 强制（本地 `pytest --cov --cov-fail-under=80` 同口径）
+[tool.coverage.run]
+source = ["src/videomind/core"]
+branch = true
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
 
 [tool.mypy]
 python_version = "3.11"

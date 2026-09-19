@@ -66,6 +66,10 @@ celery_app.conf.update(
         "videomind.tasks.pipeline_task": {
             "queue": "cpu"
         },
+        # Agent 分析（1.4 迁 Celery）：LLM 多轮调用属 CPU/IO 型重活，不占 GPU 队列
+        "videomind.tasks.agent_analyze_task": {
+            "queue": "cpu"
+        },
     },
     # Worker 预取
     worker_prefetch_multiplier=1,

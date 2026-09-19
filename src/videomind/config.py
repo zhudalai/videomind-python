@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     asr_api_key: str = ""
     # ASR API 模型名（默认 Groq 上的 whisper-large-v3-turbo，与本地档位一致以便对比）
     asr_api_model: str = "whisper-large-v3-turbo"
+    # API 路径音频大小守卫：Groq 免费档单请求硬限 25MB，超限必 413。
+    # 默认 20MB（对官方限留 20% 余量），超限直接走本地转写，不浪费一次注定失败的 API 调用
+    asr_api_max_audio_mb: float = 20.0
+    # API 路径失败时的运行时降级开关：True=失败自动转本地 faster-whisper 兜底
+    # （文档宣称的"API 主力+本地兜底"在此兑现，而非仅构造时 env 二选一）
+    asr_fallback_local: bool = True
     ocr_api_base_url: str = "https://api.ocr.space"
     ocr_api_key: str = ""
     # ocr.space OCREngine：1=最快 / 2=balanced+auto-detect(默认) / 3=最高精度200+语配额低
@@ -135,14 +141,39 @@ class Settings(BaseSettings):
     rerank_top_n: int = 20
     rerank_timeout_s: float = 30.0
 
+    # ── RAG 语义缓存（1.2，高频问答缓存，避免重复烧 LLM API）──
+    # 两级：L1 规范化(query+media_ids) SHA256 精确匹配（零嵌入成本）；
+    #       L2 embedding 余弦 ≥ threshold 的近邻匹配（同媒体集内才算命中——
+    #       同一问题在不同视频集上答案完全不同，media_ids 一致是硬约束）。
+    # 存 Redis DB0 JSON（query/query_vec/answer/evidence），TTL 到期自动失效；
+    # 索引重建/删除媒体时主动失效。fail-open：缓存故障不影响问答主流程。
+    semantic_cache_enabled: bool = True
+    semantic_cache_ttl_s: int = 21600          # 6h
+    semantic_cache_threshold: float = 0.92     # 过高≈永远 miss；过低≈答非所问
+    semantic_cache_max_entries: int = 256      # 单媒体集条目上限（LRU 逐出）
+
     # ── 视频处理 ──
     video_segment_window_ms: int = 60000
     video_chunk_overlap_ms: int = 1000
     ffmpeg_path: str = "ffmpeg"
+    # FFmpeg/FFprobe 子进程超时兜底：损坏文件可能让 ffmpeg 永不返回 → 挂死 worker。
+    # 转码上限 15 分钟（720p 长视频），probe 元信息上限 1 分钟
+    ffmpeg_timeout_s: float = 900.0
+    ffprobe_timeout_s: float = 60.0
+
+    # ── 上传 ──
+    # 上传端点流式写盘（1.5）：分块收包途中超限即断 413，不把整文件收完才拒绝；
+    # 上传全程不整文件进内存（旧 await file.read() 的 RSS 峰值 = 文件大小）
+    upload_max_mb: float = 500.0
 
     # ── 下载 ──
     download_dir: str = "./_downloads"
     ytdlp_proxy: str = ""
+    # yt-dlp 网络兜底（防慢源/断流挂死 worker）：socket 超时 + HTTP 重试 + 分片重试
+    download_socket_timeout_s: float = 30.0
+    download_retries: int = 3
+    # 磁盘预检：下载前剩余空间低于阈值 → 暂时不下载（RetryableError，磁盘释放后重试可恢复）
+    download_min_free_gb: float = 2.0
 
     # ───────────────────────── 校验 ─────────────────────────
     @field_validator("asr_provider", "ocr_provider", "embedding_provider")
