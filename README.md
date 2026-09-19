@@ -16,6 +16,8 @@
 [![Celery](https://img.shields.io/badge/Celery-5.4%2B-37814A?logo=celery&logoColor=white)](https://docs.celeryq.dev/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/zhudalai/videomind-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zhudalai/videomind-python/actions/workflows/ci.yml)
+[![Coverage: core 90%](https://img.shields.io/badge/coverage-core%2090%25-brightgreen)](https://github.com/zhudalai/videomind-python/actions/workflows/ci.yml)
 
 </div>
 
@@ -452,11 +454,21 @@ uv run pytest
 # 仅单测（跳过需真实基础设施的 e2e/infra）/ Unit tests only
 uv run pytest -m "not e2e and not infra"
 
-# 覆盖率 / Coverage
-uv run pytest --cov=src/videomind
+# 覆盖率 / Coverage（core 层 80% 门槛，CI 强制）
+uv run pytest -m "not e2e and not infra" --cov=src/videomind/core --cov-fail-under=80
 ```
 
 测试标记：`e2e`（需真实基础设施的端到端）、`infra`（需真实基础设施的集成）。
+
+**core 层覆盖率：90.1%**（2011 语句 / 分支覆盖，门槛 80%）：
+
+| 模块 | 覆盖率 | 说明 |
+|---|---|---|
+| 语义缓存 `core/rag/semantic_cache` | 97.9% | L1 精确 / L2 语义命中、LRU trim、fail-open |
+| ASR `video_pipeline/asr` | 96.3% | API/本地双路径降级、Groq 请求/响应契约、HTTP 错误分类 |
+| 下载 `video_pipeline/download` | 94.4% | 错误分类（503 可重试 vs 404 不可重试）、磁盘预检、失败清理 |
+| 索引 `video_pipeline/index` | 91.2% | 双写一致、时间戳段界校验、空文本兜底 |
+| OCR `video_pipeline/ocr` | 80.3% | phash 去重、单帧降级、新旧 PaddleOCR 双格式兼容 |
 
 ### 🇬🇧 English
 
@@ -467,11 +479,21 @@ uv run pytest
 # Unit tests only (skip e2e/infra that need real services)
 uv run pytest -m "not e2e and not infra"
 
-# Coverage
-uv run pytest --cov=src/videomind
+# Coverage (core layer, 80% gate enforced in CI)
+uv run pytest -m "not e2e and not infra" --cov=src/videomind/core --cov-fail-under=80
 ```
 
 Markers: `e2e` (end-to-end needing real infra), `infra` (integration needing real infra).
+
+**Core-layer coverage: 90.1%** (2011 statements, branch coverage, gate 80%):
+
+| Module | Coverage | Focus |
+|---|---|---|
+| Semantic cache `core/rag/semantic_cache` | 97.9% | L1 exact / L2 semantic hits, LRU trim, fail-open |
+| ASR `video_pipeline/asr` | 96.3% | API/local dual-path fallback, Groq contract, HTTP error classification |
+| Download `video_pipeline/download` | 94.4% | Error classification (503 retryable vs 404 not), disk pre-check, cleanup |
+| Indexer `video_pipeline/index` | 91.2% | Dual-write consistency, timestamp bounds, empty-text fallback |
+| OCR `video_pipeline/ocr` | 80.3% | phash dedup, per-frame degradation, legacy/new PaddleOCR formats |
 
 ### 🇯🇵 日本語
 
@@ -482,11 +504,21 @@ uv run pytest
 # 単体テストのみ（実インフラが必要な e2e/infra をスキップ）/ Unit tests only
 uv run pytest -m "not e2e and not infra"
 
-# カバレッジ / Coverage
-uv run pytest --cov=src/videomind
+# カバレッジ / Coverage（core 層 80% ゲート、CI で強制）
+uv run pytest -m "not e2e and not infra" --cov=src/videomind/core --cov-fail-under=80
 ```
 
 マーカー: `e2e` (実インフラ必須のエンドツーエンド)、`infra` (実インフラ必須の統合)。
+
+**core 層カバレッジ: 90.1%**（2011 ステートメント / ブランチカバレッジ、ゲート 80%）：
+
+| モジュール | カバレッジ | 内容 |
+|---|---|---|
+| セマンティックキャッシュ `core/rag/semantic_cache` | 97.9% | L1 完全一致 / L2 セマンティックヒット、LRU trim、フェイルオープン |
+| ASR `video_pipeline/asr` | 96.3% | API/ローカル二重パス降格、Groq コントラクト、HTTP エラー分類 |
+| ダウンロード `video_pipeline/download` | 94.4% | エラー分類（503 リトライ可 vs 404 不可）、ディスク事前チェック、失敗時クリーンアップ |
+| インデクサ `video_pipeline/index` | 91.2% | 二重書き込み整合性、タイムスタンプ境界、空テキストフォールバック |
+| OCR `video_pipeline/ocr` | 80.3% | phash 重複排除、フレーム単位降格、新旧 PaddleOCR フォーマット両対応 |
 
 ---
 

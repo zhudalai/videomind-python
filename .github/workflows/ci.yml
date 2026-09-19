@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # secret_key 无默认值，config 必须有 .env；CI 用 example 即可（仅跑单测，无真实密钥）
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Run unit tests with coverage gate
+        run: |
+          uv run pytest -m "not e2e and not infra" \
+            --cov=src/videomind/core \
+            --cov-report=xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14

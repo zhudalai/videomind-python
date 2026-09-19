@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid as _uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -12,6 +12,11 @@ from sqlalchemy import func, select
 from videomind.infrastructure.storage import models as m
 from videomind.infrastructure.storage.database import AsyncSessionLocal
 from videomind.interface import app
+
+# 1.4 后 analyze 的 dispatch 已迁 Celery（BackgroundTasks → agent_analyze_task）。
+# 测试环境无 broker：patch 掉发送侧 apply_async（mock 吞掉真正的入队），
+# 第一个用例断言 dispatch 契约（队列/参数），其余用例只防误触发。
+_APPLY_ASYNC = "videomind.application.task_orchestration.tasks.agent_analyze_task.apply_async"
 
 
 async def _seed(session, use_ready=True):
@@ -43,10 +48,8 @@ async def _seed(session, use_ready=True):
 
 @pytest.mark.asyncio
 async def test_analyze_multi_creates_task_and_association_rows(pg_session) -> None:
-    from videomind.interface.routes import agent as agent_mod
-
     uid, m1, m2, _nr = await _seed(pg_session)
-    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+    with patch(_APPLY_ASYNC) as apply_mock:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as c:
             r = await c.post("/api/agent/analyze", json={
@@ -54,6 +57,17 @@ async def test_analyze_multi_creates_task_and_association_rows(pg_session) -> No
                 "user_id": str(uid), "max_rounds": 2})
     assert r.status_code == 202, r.text
     tid = r.json()["task_id"]
+    # dispatch 契约（1.4 BackgroundTasks → Celery）：新任务必发 cpu 队列；
+    # context 里 uuid 转 str（Celery JSON 序列化约束）、字段完整，
+    # worker 侧 agent_analyze_task 还原后交给 run_agent_analysis
+    apply_mock.assert_called_once()
+    kwargs = apply_mock.call_args.kwargs
+    assert kwargs["queue"] == "cpu"
+    dispatch_ctx = kwargs["args"][0]
+    assert dispatch_ctx["task_id"] == tid
+    assert dispatch_ctx["goal"] == "g1"
+    assert [_uuid.UUID(x) for x in dispatch_ctx["media_ids"]] == [m1, m2]
+    assert dispatch_ctx["max_rounds"] == 2
     async with AsyncSessionLocal() as s:
         cnt = (await s.execute(select(func.count()).select_from(m.AnalysisTaskMedia)
             .where(m.AnalysisTaskMedia.task_id == _uuid.UUID(tid)))).scalar()
@@ -66,10 +80,8 @@ async def test_analyze_multi_creates_task_and_association_rows(pg_session) -> No
 
 @pytest.mark.asyncio
 async def test_analyze_idempotent_reorders_reuse_same_task(pg_session) -> None:
-    from videomind.interface.routes import agent as agent_mod
-
     uid, m1, m2, _nr = await _seed(pg_session)
-    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+    with patch(_APPLY_ASYNC):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as c:
             r1 = await c.post("/api/agent/analyze", json={
@@ -84,10 +96,8 @@ async def test_analyze_idempotent_reorders_reuse_same_task(pg_session) -> None:
 
 @pytest.mark.asyncio
 async def test_analyze_rejects_not_ready_media_409(pg_session) -> None:
-    from videomind.interface.routes import agent as agent_mod
-
     uid, _m1, _m2, nr = await _seed(pg_session)
-    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+    with patch(_APPLY_ASYNC):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as c:
             r = await c.post("/api/agent/analyze", json={
@@ -100,11 +110,9 @@ async def test_analyze_rejects_not_ready_media_409(pg_session) -> None:
 
 @pytest.mark.asyncio
 async def test_analyze_rejects_missing_media_404(pg_session) -> None:
-    from videomind.interface.routes import agent as agent_mod
-
     uid, _m1, _m2, _nr = await _seed(pg_session)
     missing = _uuid.uuid4()
-    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+    with patch(_APPLY_ASYNC):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as c:
             r = await c.post("/api/agent/analyze", json={
@@ -116,8 +124,6 @@ async def test_analyze_rejects_missing_media_404(pg_session) -> None:
 
 @pytest.mark.asyncio
 async def test_analyze_rejects_empty_media_ids_422(pg_session) -> None:
-    from videomind.interface.routes import agent as agent_mod
-
     uid, _m1, _m2, _nr = await _seed(pg_session)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
@@ -133,10 +139,8 @@ async def test_analyze_accepts_max_rounds_3(pg_session) -> None:
 
     回归：浏览器跑深度对比任务 max_rounds=3 被 Pydantic  422 挡死。
     """
-    from videomind.interface.routes import agent as agent_mod
-
     uid, m1, m2, _nr = await _seed(pg_session)
-    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+    with patch(_APPLY_ASYNC):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as c:
             r = await c.post("/api/agent/analyze", json={
@@ -149,10 +153,8 @@ async def test_analyze_accepts_max_rounds_3(pg_session) -> None:
 @pytest.mark.asyncio
 async def test_analyze_rejects_max_rounds_4_still(pg_session) -> None:
     """max_rounds > 3 仍需拒绝（防止误用上限）。"""
-    from videomind.interface.routes import agent as agent_mod
-
     uid, m1, m2, _nr = await _seed(pg_session)
-    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+    with patch(_APPLY_ASYNC):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as c:
             r = await c.post("/api/agent/analyze", json={
@@ -167,8 +169,6 @@ async def test_analyze_accepts_4_media_ids(pg_session) -> None:
 
     回归：Pydantic max_length=2 硬限，跨多视频对比路由被 422 拒。
     """
-    from videomind.interface.routes import agent as agent_mod
-
     uid = _uuid.uuid4()
     mids = [_uuid.uuid4() for _ in range(4)]
     pg_session.add(m.User(id=uid, username=f"u{uid.hex[:8]}",
@@ -183,7 +183,7 @@ async def test_analyze_accepts_4_media_ids(pg_session) -> None:
             minio_bucket="test-bucket", minio_object=f"videos/{mid.hex[:8]}/original.mp4"))
     await pg_session.commit()
 
-    with patch.object(agent_mod, "_run_agent_loop", AsyncMock()):
+    with patch(_APPLY_ASYNC):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as c:
             r = await c.post("/api/agent/analyze", json={

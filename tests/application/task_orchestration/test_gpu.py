@@ -88,16 +88,16 @@ class TestGPUHandle:
         assert handle._acquired is True
 
     def test_handle_release_calls_manager(self):
-        """handle.release() calls manager.release."""
+        """handle.release() calls manager.release with (stage, lock_value)."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
 
         mgr = GPUResourceManager()
         mgr.release = AsyncMock(return_value=True)
-        handle = GPUHandle(task_id="task-1", stage="asr", _manager=mgr)
+        handle = GPUHandle(task_id="task-1", stage="asr", _manager=mgr, _lock_value="task-1:123")
 
         asyncio.run(handle.release())
-        mgr.release.assert_called_once_with("task-1", "asr")
+        mgr.release.assert_called_once_with("asr", "task-1:123")
         assert handle._acquired is False
 
     def test_handle_double_release_idempotent(self):
@@ -120,7 +120,7 @@ class TestGPUHandle:
 
         mgr = GPUResourceManager()
         mgr.release = AsyncMock(return_value=True)
-        handle = GPUHandle(task_id="task-1", stage="asr", _manager=mgr)
+        handle = GPUHandle(task_id="task-1", stage="asr", _manager=mgr, _lock_value="v-1")
 
         async def test_cm():
             async with handle as h:
@@ -129,6 +129,85 @@ class TestGPUHandle:
             mgr.release.assert_called_once()
 
         asyncio.run(test_cm())
+
+
+class TestLockValueConsistency:
+    """Regression: acquire 写入的锁值必须与续租/释放使用的是同一份。
+
+    旧实现在 acquire/heartbeat/release 三处各自重新生成锁值（内含时间戳），
+    Lua 的 GET==ARGV 比对在续租/释放时永远失败——超 30s TTL 的任务互斥失效。
+    """
+
+    def test_acquire_stores_value_in_handle(self):
+        """acquire 成功后 handle._lock_value == 写入 Redis 的值（不再重新生成）。"""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        mgr = GPUResourceManager()
+        mgr._redis = AsyncMock()
+        mgr._redis.script_load.return_value = "sha-x"
+        # SET NX EX 成功（返回 1）
+        mgr._redis.evalsha.return_value = 1
+
+        async def run():
+            handle = await mgr.acquire("task-9", "asr", timeout=1.0)
+            return handle
+
+        handle = asyncio.run(run())
+        # evalsha(sha, 1, key, value, ttl) —— 锁值在 args[3]
+        written = mgr._redis.evalsha.call_args_list[0].args[3]
+        assert handle._lock_value == written
+        assert written.startswith("task-9:")
+
+    def test_release_uses_stored_value_not_regenerated(self):
+        """release 传给 Lua 的值 == acquire 写入的值（时间戳不再刷新）。"""
+        import asyncio
+        import time
+        from unittest.mock import AsyncMock
+
+        mgr = GPUResourceManager()
+        mgr._redis = AsyncMock()
+        mgr._redis.script_load.return_value = "sha-x"
+        mgr._redis.evalsha.return_value = 1
+
+        async def run():
+            handle = await mgr.acquire("task-9", "ocr", timeout=1.0)
+            await asyncio.sleep(0.05)  # 若重新生成，时间戳位必然不同
+            await handle.release()
+            return handle
+
+        handle = asyncio.run(run())
+        calls = mgr._redis.evalsha.call_args_list
+        acquire_val = calls[0].args[3]
+        release_val = calls[-1].args[3]
+        assert acquire_val == release_val == handle._lock_value
+        # 锁值的时间戳是 acquire 时刻的，不是释放时刻的
+        assert int(release_val.split(":")[-1]) <= int(time.time() * 1000)
+
+    def test_heartbeat_reuses_stored_value(self):
+        """心跳续租传给 Lua 的值 == acquire 写入的值。"""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        mgr = GPUResourceManager()
+        mgr._redis = AsyncMock()
+        mgr._redis.script_load.return_value = "sha-x"
+        mgr._redis.evalsha.return_value = 1
+        # 心跳间隔默认 max(5, ttl//3)；压到最小让心跳尽快跑一轮
+        mgr._heartbeat_interval = 0.01
+
+        async def run():
+            handle = await mgr.acquire("task-9", "embedding", timeout=1.0)
+            await asyncio.sleep(0.05)  # 等至少一轮心跳
+            await handle.release()
+            return handle
+
+        asyncio.run(run())
+        calls = mgr._redis.evalsha.call_args_list
+        acquire_val = calls[0].args[3]
+        # 心跳的 renew 调用也携带同一值
+        renew_vals = [c.args[3] for c in calls[1:]]
+        assert acquire_val in renew_vals
 
 
 if __name__ == "__main__":

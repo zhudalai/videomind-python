@@ -1,8 +1,10 @@
 # tests/conftest.py
 import asyncio
 import os
+import sys
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 import pytest
@@ -76,10 +78,12 @@ async def pg_session(settings) -> AsyncGenerator[AsyncSession, None]:
     global _alembic_done
     if not _alembic_done:
         # 用 alembic CLI 升级（不要用 create_all）
+        # 便携化（2.2）：sys.executable 替代硬编码 Anaconda 绝对路径（CI/他机可跑），
+        # 项目根从 conftest 位置推导（cwd 随 pytest 启动目录漂移）
         import subprocess
         result = subprocess.run(
-            [r"D:\ProgramData\anaconda3\python.exe", "-m", "alembic", "upgrade", "head"],
-            cwd=r"D:\shu_e\Documents\Video MInd python",
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=Path(__file__).resolve().parents[1],
             capture_output=True, text=True, timeout=120
         )
         if result.returncode != 0:

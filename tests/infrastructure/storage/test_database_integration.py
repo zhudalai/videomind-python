@@ -16,8 +16,13 @@ class TestDatabaseConnection:
         assert result.scalar() == 1
 
     @pytest.mark.asyncio
+    @pytest.mark.infra
     async def test_engine_connectivity(self):
-        """engine 直接连通。"""
+        """engine 直接连通。
+
+        标 infra：本测试绕过 pg_session fixture 的 alembic 守门（直用模块级 engine），
+        PG down 时会 fail 而非 skip；CI 无 PG 跑 `-m "not e2e and not infra"` 必须排除它。
+        """
         async with engine.connect() as conn:
             result = await conn.execute(text("SELECT 42"))
             assert result.scalar() == 42
