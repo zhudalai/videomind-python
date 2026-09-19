@@ -81,6 +81,10 @@ class Indexer:
         # BM25 索引），否则重处理后的新 chunk 不会进检索，老 chunk 已删会导致缓存陈旧。
         from videomind.core.rag.pipeline import invalidate_retriever_cache
         invalidate_retriever_cache(media_id)
+        # 同步失效该 media 的 RAG 语义缓存条目（1.3）：chunks 变化后旧答案不再可信，
+        # 不等 TTL 立即失效；invalidate 内部 fail-open，失败不阻断索引
+        from videomind.core.rag.semantic_cache import invalidate_semantic_cache_for_media
+        await invalidate_semantic_cache_for_media(media_id)
         # 同步清掉 Qdrant 旧 points（按 payload.media_id 过滤），保持双写一致
         try:
             from qdrant_client.http import models as qm
@@ -151,10 +155,12 @@ class Indexer:
                 chunk_size=self.CHUNK_SIZE,
                 chunk_overlap=self.CHUNK_OVERLAP,
             )
-            for p in pieces:
-                # 近似时间分配（按字符比例）
+            for piece_idx, p in enumerate(pieces):
+                # 近似时间分配（按段内 piece 序号均分时段）。必须用段内序号：
+                # 旧实现用全局 chunk_idx，多段时第 N 段的 start 会漂出段界
+                # （start ≥ seg_end），RAG 引用时间戳指向错误视频位置。
                 duration = seg_end - seg_start
-                p_start = seg_start + int(duration * chunk_idx / max(1, len(pieces)))
+                p_start = seg_start + int(duration * piece_idx / max(1, len(pieces)))
                 p_end = p_start + max(1000, int(duration / max(1, len(pieces))))
                 all_chunks_data.append({
                     "content": p,
