@@ -12,6 +12,9 @@
    - `transcription` 表（全量文本 + language + model_name + duration_sec）
    - `transcription_chunk` 表（逐片段文本 + 时间戳 + status）
 4. GPU 显存管理：`faster-whisper` 进程内加载模型，单 Worker 串行（Celery concurrency=1）。
+5. **防御性双闸（3.7，仅 provider=api 生效）**：超限音频预检直接走本地（Groq 单请求
+   25MB 硬限，不浪费注定 413 的调用）；API 暂时性失败运行时降级本地兜底（兑现
+   "API 主力+本地兜底"承诺，旧实现失败即盲重试3次后管线死）。
 
 配置锚点（config.py）:
     ASR_PROVIDER=local
@@ -22,6 +25,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +34,10 @@ from typing import Any
 import anyio
 
 from videomind.config import get_settings
+from videomind.core.errors import NonRetryableError, RetryableError
 from videomind.infrastructure.storage import models as m
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -61,15 +68,44 @@ class ASREngine:
         self._api_base_url = s.asr_api_base_url
         self._api_key = s.asr_api_key
         self._api_model = s.asr_api_model
+        # 防御性双闸（3.7）：超限预检 + 失败降级开关
+        self._api_max_audio_mb = float(s.asr_api_max_audio_mb)
+        self._fallback_local = bool(s.asr_fallback_local)
 
     async def transcribe(
         self, audio_path: Path, media_id: uuid.UUID
     ) -> ASRResult:
-        """识别音频，返回全量文本 + 分片结果。"""
+        """识别音频，返回全量文本 + 分片结果。
+
+        防御性双闸（3.7，仅 provider=api 生效）：
+        - **超限预检**：音频 > asr_api_max_audio_mb → 直接本地转写。Groq 免费档
+          单请求硬限 25MB，整读+上传注定 413，白耗一次调用与带宽。
+        - **运行时降级**：API 暂时性失败（超时/传输/429/5xx）且 asr_fallback_local
+          时转本地兜底先出结果；确定性失败（缺配置/4xx 被拒）不降级——fail loudly
+          让用户看到配置/格式根因，静默降级反而掩盖问题。
+        """
         if self._provider == "local":
             return await self._transcribe_local(audio_path, media_id)
-        else:
+
+        # provider == "api"：先超限预检，不做注定失败的调用
+        size_mb = audio_path.stat().st_size / (1 << 20)
+        if size_mb > self._api_max_audio_mb:
+            log.warning(
+                "音频 %.1fMB 超过 API 单请求上限 %.1fMB，跳过 API 直接本地转写: %s",
+                size_mb, self._api_max_audio_mb, audio_path,
+            )
+            return await self._transcribe_local(audio_path, media_id)
+
+        try:
             return await self._transcribe_api(audio_path, media_id)
+        except NonRetryableError:
+            # 缺配置/请求被拒：降级救不了根因，原样上抛走终态
+            raise
+        except Exception as e:
+            if not self._fallback_local:
+                raise
+            log.warning("ASR API 路径失败（%r），运行时降级本地转写", e)
+            return await self._transcribe_local(audio_path, media_id)
 
     # ── 本地路径 ──
     async def _transcribe_local(self, audio_path: Path, media_id: uuid.UUID) -> ASRResult:
@@ -84,7 +120,15 @@ class ASREngine:
             )
 
         if self._local_model is None:
-            self._local_model = await anyio.to_thread.run_sync(_load_model)
+            # 加载失败多因权重下载中断/磁盘暂满（退避后可恢复）——显式翻译成
+            # RetryableError；裸异常（含 CUDA OOM RuntimeError）穿透后 autoretry
+            # 无法分类，重试耗尽也不落终态原因
+            try:
+                self._local_model = await anyio.to_thread.run_sync(_load_model)
+            except Exception as e:
+                raise RetryableError(
+                    f"faster-whisper 模型加载失败（权重下载中断/磁盘暂满可退避恢复）: {e}"
+                ) from e
 
         def _transcribe() -> tuple[str, str, list]:
             # faster-whisper 返回 (segments generator, info)
@@ -134,7 +178,7 @@ class ASREngine:
           - verbose_json 含 segments 时间戳 → 组装回 ASRResult.chunks
         """
         if not self._api_base_url or not self._api_key:
-            raise RuntimeError(
+            raise NonRetryableError(
                 "ASR_PROVIDER=api 需配置 ASR_API_BASE_URL 与 ASR_API_KEY"
                 "（Groq：https://api.groq.com/openai/v1 + console.groq.com 申请的 key）"
             )
@@ -149,13 +193,29 @@ class ASREngine:
             self._initial_prompt,
         )
         # 转录可能较长（大音频 + 推理），给 300s 上限；connect 10s
-        async with httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {self._api_key}"},
-            timeout=httpx.Timeout(300.0, connect=10.0),
-        ) as client:
-            r = await client.post(url, data=data, files=files)
-            r.raise_for_status()
-            return _parse_groq_response(r.json(), model_name=self._api_model)
+        try:
+            async with httpx.AsyncClient(
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                timeout=httpx.Timeout(300.0, connect=10.0),
+            ) as client:
+                r = await client.post(url, data=data, files=files)
+                r.raise_for_status()
+                return _parse_groq_response(r.json(), model_name=self._api_model)
+        except httpx.TimeoutException as e:
+            raise RetryableError(f"ASR API 超时（300s 上限）: {e}") from e
+        except httpx.TransportError as e:
+            # 拒连/DNS/读写中断：退避重试或降级本地都有意义
+            raise RetryableError(f"ASR API 传输失败（网络抖动/服务不可达）: {e}") from e
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            if code == 429 or code >= 500:
+                raise RetryableError(
+                    f"ASR API 暂时性 HTTP {code}（限流/服务端故障）: {e}"
+                ) from e
+            # 400/413/415 等：音频格式问题或请求被拒，重试必然同结果
+            raise NonRetryableError(
+                f"ASR API HTTP {code}（请求被拒/音频不受支持，重试无意义）: {e}"
+            ) from e
 
 
 # ──────────────────────────── Groq API 请求/响应辅助 ────────────────────────────

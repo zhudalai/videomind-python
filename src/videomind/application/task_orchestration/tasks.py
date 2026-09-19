@@ -11,13 +11,15 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpx
 from celery import Celery, chain, group
-
 from celery.utils.log import get_task_logger
 
 from videomind.application.task_orchestration.celery import celery_app
@@ -27,6 +29,7 @@ from videomind.application.task_orchestration.broadcast import (
     stage_to_progress,
 )
 from videomind.config import get_settings
+from videomind.core.errors import NonRetryableError, RetryableError
 from videomind.observability.instrumentation import trace_stage, traced_span
 
 
@@ -39,6 +42,7 @@ async def _set_media_status(media_id_str: str, status: str) -> None:
     download→downloaded 由 download_video_task 直接写（附带元数据），
     其余 stage（transcode/asr/ocr）只更新 status；index→ready 由 Indexer.index 内部写。
     仅在向前推进时写，避免回退或覆盖终态（ready/failed）。
+    失败终态不走这里（会被"只向前"守卫挡住）——见 _mark_media_failed。
     """
     from videomind.infrastructure.storage import models as m
     from videomind.infrastructure.storage.database import db_session
@@ -48,7 +52,6 @@ async def _set_media_status(media_id_str: str, status: str) -> None:
         "transcoding": 3, "transcoded": 4,
         "asr": 5, "asr_done": 6,
         "ocr": 7, "ocr_done": 8, "indexing": 9, "ready": 10,
-        "failed": -1,
     }
     async with db_session() as db:
         media = await db.get(m.MediaFile, uuid.UUID(media_id_str))
@@ -60,6 +63,51 @@ async def _set_media_status(media_id_str: str, status: str) -> None:
         if nxt > cur and media.status not in ("ready", "failed"):
             media.status = status
             await db.commit()
+
+
+async def _mark_media_failed(media_id_str: str, error_message: str, *, stage: str = "") -> None:
+    """管线阶段最终失败（重试耗尽）→ 无条件写失败终态 + error_message。
+
+    与 _set_media_status 的"只向前推进"守卫相反：failed 是终态，
+    旧实现把它放进 _advance 映射（-1）导致 `nxt > cur` 永假、永远写不进去
+    （死代码），media 卡在中间态、轮询端永远看不到失败原因。
+    """
+    from videomind.infrastructure.storage import models as m
+    from videomind.infrastructure.storage.database import db_session
+
+    async with db_session() as db:
+        media = await db.get(m.MediaFile, uuid.UUID(media_id_str))
+        if media is None or media.status in ("ready", "failed"):
+            return
+        media.status = "failed"
+        media.error_message = f"[{stage}] {error_message}" if stage else error_message
+        await db.commit()
+
+
+def _cleanup_local_source(ctx: IngestionContext) -> None:
+    """转码成功后清理本地原始视频（URL 下载目录 / 上传 materialize 工作目录）。
+
+    为什么选在 transcode 成功点清：后续 asr/ocr/index 只从 MinIO 拿中间产物，
+    原始视频本地使命已尽；而失败重试时本地文件还得在（重试直接复用，不重新下载），
+    所以只在成功路径清。旧实现临时文件全不删（仓库曾积 2 个 144MB 残留）。
+    防误删：仅当父目录名含 media_id[:8]（本媒体专属目录——download 子目录与
+    上传 materialize 工作目录两条路径都满足）才整目录删除，否则只删文件本身。
+    清理失败仅告警——磁盘残留可运维兜底，不该让已成功的转码任务回滚失败。
+    """
+    dl = ctx.download_result or {}
+    local_path = dl.get("local_path")
+    if not local_path:
+        return
+    p = Path(local_path)
+    try:
+        if not p.exists():
+            return
+        if ctx.media_id[:8] in p.parent.name:
+            shutil.rmtree(p.parent, ignore_errors=True)
+        else:
+            p.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("transcode 后清理本地源文件失败（忽略）: %s", local_path)
 
 
 # ──────────────────────────── 状态上下文 ────────────────────────────
@@ -108,28 +156,54 @@ class IngestionContext:
 
 
 class BaseVideoTask(celery_app.Task):
-    """视频任务基类：统一异常处理、重试、进度广播。"""
+    """视频任务基类：统一异常处理、重试、进度广播。
+
+    重试策略（二分法，见 videomind.core.errors）：
+    - **只重试暂时性异常**：RetryableError + 标准库瞬态基类 + httpx 传输层故障。
+      ConnectionError/TimeoutError 本身是 OSError 子类，显式列出以自文档。
+    - **确定性失败不重试**：NonRetryableError / ValueError（契约违规、格式损坏）
+      直接走 on_failure → 落库终态。旧实现 `autoretry_for=(Exception,)` 对 404
+      视频、私享视频也盲重 3 次，纯浪费算力且拖慢"失败可见"时间。
+    """
 
     # 重试策略
-    autoretry_for = (Exception,)
+    autoretry_for = (
+        RetryableError,
+        ConnectionError,
+        TimeoutError,
+        OSError,
+        httpx.TransportError,  # 传输层（拒连/DNS/读写超时）恒为暂时性
+    )
     retry_backoff = True
     retry_backoff_max = 600
     retry_jitter = True
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
-        """失败时广播错误进度。"""
+        """最终失败（重试耗尽 / 不可重试异常）→ 落库终态 + 广播错误进度。
+
+        旧实现只发 Redis pub/sub 不落库：worker 重启或 Redis 清空后失败状态丢失，
+        media 永卡中间态，HTTP/SSE 轮询端永远看不到失败原因（bug）。
+        """
         import anyio
 
         ctx = args[0] if args else {}
         media_id = ctx.get("media_id") if isinstance(ctx, dict) else None
-        if media_id:
-            anyio.run(
-                broadcast_progress,
-                media_id,
-                "failed",
-                -1,
-                f"Task {self.name} failed: {exc}",
-            )
+        if not media_id:
+            return
+
+        stage = self.name.rsplit(".", 1)[-1]  # 例：download_video_task
+        error_message = f"Task {self.name} failed: {exc}"
+
+        async def _fail():
+            # 先落库再广播：轮询端收到 pub/sub 时 DB 已有终态可对账
+            await _mark_media_failed(media_id, error_message, stage=stage)
+            await broadcast_progress(media_id, "failed", -1, error_message)
+
+        try:
+            anyio.run(_fail)
+        except Exception:
+            # 落库/广播自身失败不能掩盖原始任务异常（on_failure 抛错会盖住 exc）
+            logger.exception("on_failure: 终态落库/广播失败 media_id=%s", media_id)
 
     def on_retry(self, exc, task_id, args, kwargs, einfo):
         """重试时广播重试进度。"""
@@ -243,12 +317,14 @@ def download_video_task(self, context: dict) -> dict:
         object_key = ctx.minio_object
         content_hash = ctx.content_hash
         if not (object_key and content_hash):
-            raise ValueError(
+            raise NonRetryableError(
                 "skip_download=True 但 minio_object/content_hash 缺失；上传 endpoint 必须填齐"
             )
 
-        # 工作目录：/tmp/transcode_{media_id[:8]}/original.mp4（与 download 同布局，transcode 兼容）
-        workdir = Path(f"/tmp/transcode_{ctx.media_id[:8]}")
+        # 工作目录：{系统临时目录}/transcode_{media_id[:8]}/original.mp4（与 download 同布局，transcode 兼容）
+        # 不硬编码 /tmp——Windows/容器下 tempfile.gettempdir() 才是正确落点；目录由 transcode
+        # 成功后 _cleanup_local_source 统一清理
+        workdir = Path(tempfile.gettempdir()) / f"transcode_{ctx.media_id[:8]}"
         workdir.mkdir(parents=True, exist_ok=True)
         local_path = workdir / "original.mp4"
 
@@ -307,7 +383,7 @@ def transcode_video_task(self, context: dict) -> dict:
     async def _run() -> IngestionContext:
         dl = ctx.download_result
         if not dl:
-            raise ValueError("download_result missing")
+            raise NonRetryableError("download_result missing")
 
         with trace_stage("transcode", ctx.media_id):
             with traced_span("pipeline.transcode", attributes={"media_id": ctx.media_id}):
@@ -337,6 +413,8 @@ def transcode_video_task(self, context: dict) -> dict:
                             await db.commit()
                 await _set_media_status(ctx.media_id, "transcoded")
                 await broadcast_progress(ctx.media_id, "transcoded", 40, "转码完成")
+                # 原始视频已上 MinIO、转码产物就绪——本地源文件使命完成，即清
+                _cleanup_local_source(ctx)
                 return ctx
 
     return anyio.run(_run).to_dict()
@@ -372,56 +450,60 @@ def asr_task(self, context: dict) -> dict:
     async def _run() -> IngestionContext:
         tc = ctx.transcode_result
         if not tc:
-            raise ValueError("transcode_result missing")
+            raise NonRetryableError("transcode_result missing")
 
-        # 下载音频到本地临时
+        # 下载音频到本地临时文件（系统临时目录；不再硬编码 /tmp——Windows 不落地）
         minio = get_minio_client()
-        audio_local = Path(f"/tmp/{ctx.media_id}_audio.ogg")
+        audio_local = Path(tempfile.gettempdir()) / f"{ctx.media_id}_audio.ogg"
         await minio.download_file(tc["audio_minio"], str(audio_local))
 
-        # GPU 独占跑 ASR
-        gpu = get_gpu_manager()
-        async with await gpu.acquire(self.request.id, "asr"):
-            with trace_stage("asr", ctx.media_id):
-                with traced_span("pipeline.asr", attributes={"media_id": ctx.media_id, "task_id": self.request.id}):
-                    asr_engine = get_asr()
-                    asr_result = await asr_engine.transcribe(audio_local, uuid.UUID(ctx.media_id))
+        try:
+            # GPU 独占跑 ASR
+            gpu = get_gpu_manager()
+            async with await gpu.acquire(self.request.id, "asr"):
+                with trace_stage("asr", ctx.media_id):
+                    with traced_span("pipeline.asr", attributes={"media_id": ctx.media_id, "task_id": self.request.id}):
+                        asr_engine = get_asr()
+                        asr_result = await asr_engine.transcribe(audio_local, uuid.UUID(ctx.media_id))
 
-        # 可选：LLM 加标点（方案 2）—— Whisper 系列在中文不产标点
-        # 接在 transcribe 后、入库前；独立于 GPU 锁，GPU 释放后再跑（不占 GPU）
-        # 失败/改字自动回退裸原文（punctuate.py 守护），不阻塞主流程
-        from videomind.config import get_settings
-        _s = get_settings()
-        if _s.asr_punctuate and asr_result.full_text:
-            from videomind.core.video_pipeline.punctuate import punctuate_result
-            from videomind.core.model_gateway.http_client import OpenAICompatibleClient
-            _pc = OpenAICompatibleClient(
-                base_url=_s.asr_punctuate_base_url,
-                api_key=_s.asr_punctuate_api_key,
-                default_model=_s.asr_punctuate_model,
-                timeout=180.0,
-            )
-            try:
-                asr_result = await punctuate_result(
-                    asr_result, _pc, _s.asr_punctuate_model,
-                    max_tokens=_s.asr_punctuate_max_tokens,
-                    temperature=_s.asr_punctuate_temperature,
+            # 可选：LLM 加标点（方案 2）—— Whisper 系列在中文不产标点
+            # 接在 transcribe 后、入库前；独立于 GPU 锁，GPU 释放后再跑（不占 GPU）
+            # 失败/改字自动回退裸原文（punctuate.py 守护），不阻塞主流程
+            from videomind.config import get_settings
+            _s = get_settings()
+            if _s.asr_punctuate and asr_result.full_text:
+                from videomind.core.video_pipeline.punctuate import punctuate_result
+                from videomind.core.model_gateway.http_client import OpenAICompatibleClient
+                _pc = OpenAICompatibleClient(
+                    base_url=_s.asr_punctuate_base_url,
+                    api_key=_s.asr_punctuate_api_key,
+                    default_model=_s.asr_punctuate_model,
+                    timeout=180.0,
                 )
-            finally:
-                await _pc.close()
+                try:
+                    asr_result = await punctuate_result(
+                        asr_result, _pc, _s.asr_punctuate_model,
+                        max_tokens=_s.asr_punctuate_max_tokens,
+                        temperature=_s.asr_punctuate_temperature,
+                    )
+                finally:
+                    await _pc.close()
 
-        # 入库
-        async with db_session() as db:
-            trans, chunks = await save_transcription(db, uuid.UUID(ctx.media_id), asr_result)
-            await db.commit()
-            ctx.transcription_id = str(trans.id)
-            ctx.asr_chunks_count = len(chunks)
+            # 入库
+            async with db_session() as db:
+                trans, chunks = await save_transcription(db, uuid.UUID(ctx.media_id), asr_result)
+                await db.commit()
+                ctx.transcription_id = str(trans.id)
+                ctx.asr_chunks_count = len(chunks)
 
-        ctx.current_stage = "asr_done"
-        ctx.progress_pct = 60
-        await _set_media_status(ctx.media_id, "asr_done")
-        await broadcast_progress(ctx.media_id, "asr", 60, "语音识别完成")
-        return ctx
+            ctx.current_stage = "asr_done"
+            ctx.progress_pct = 60
+            await _set_media_status(ctx.media_id, "asr_done")
+            await broadcast_progress(ctx.media_id, "asr", 60, "语音识别完成")
+            return ctx
+        finally:
+            # 音频临时文件用完即清；失败重试会重新从 MinIO 拉取，残留只占磁盘
+            audio_local.unlink(missing_ok=True)
 
     return anyio.run(_run).to_dict()
 
@@ -454,7 +536,7 @@ def ocr_task(self, context: dict) -> dict:
     async def _run() -> IngestionContext:
         tc = ctx.transcode_result
         if not tc:
-            raise ValueError("transcode_result missing")
+            raise NonRetryableError("transcode_result missing")
 
         gpu = get_gpu_manager()
         try:
@@ -530,7 +612,7 @@ def index_task(self, context: dict) -> dict:
 
     async def _run() -> IngestionContext:
         if not ctx.transcription_id:
-            raise ValueError("transcription_id missing")
+            raise NonRetryableError("transcription_id missing")
 
         gpu = get_gpu_manager()
         async with await gpu.acquire(self.request.id, "embedding"):
@@ -609,6 +691,39 @@ def pipeline_task(self, context: dict) -> dict:
     }
 
 
+# ──────────────────────────── Agent 分析任务（1.4）────────────────────────────
+
+
+@celery_app.task(bind=True, name="videomind.tasks.agent_analyze_task")
+def agent_analyze_task(self, context: dict) -> None:
+    """Agent 分析（cpu 队列）：包装 agent_runner.run_agent_analysis。
+
+    1.4 从 FastAPI BackgroundTasks 平迁而来——API 进程重启不丢任务、
+    重活不占 HTTP worker；HTTP 接口与前端轮询不变（AnalysisTask 状态机在 PG）。
+
+    不继承 BaseVideoTask 的三点理由：
+    1. 无 IngestionContext / media 生命周期，on_failure 的 media 落库不适用；
+    2. 失败已在 run_agent_analysis 内部落 AnalysisTask 终态（status=failed），
+       Celery 层重试只会重复烧 LLM token，无意义；
+    3. uuid 不可 JSON 序列化——context 一律转 str 传输（worker 侧还原）。
+
+    context: {"task_id": str, "goal": str, "media_ids": [str], "max_rounds": int}
+    """
+    import anyio
+
+    from videomind.application.task_orchestration.agent_runner import run_agent_analysis
+
+    async def _run() -> None:
+        await run_agent_analysis(
+            task_id=uuid.UUID(context["task_id"]),
+            goal=context["goal"],
+            media_ids=[uuid.UUID(x) for x in context["media_ids"]],
+            max_rounds=int(context["max_rounds"]),
+        )
+
+    anyio.run(_run)
+
+
 # ──────────────────────────── 导出 ────────────────────────────
 
 
@@ -621,4 +736,5 @@ __all__ = [
     "ocr_task",
     "index_task",
     "pipeline_task",
+    "agent_analyze_task",
 ]

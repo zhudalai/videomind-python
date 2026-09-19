@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from typing import Any
 import anyio
 
 from videomind.config import get_settings
+from videomind.core.errors import NonRetryableError, RetryableError
 
 
 # ──────────────────────────── yt-dlp 统一配置 ────────────────────────────
@@ -86,7 +88,15 @@ class Downloader:
         s = get_settings()
         self._download_dir = Path(s.download_dir)
         self._proxy = s.ytdlp_proxy or None
-        self._ydl_opts = {**YDL_DEFAULT_OPTS}
+        self._min_free_gb = float(s.download_min_free_gb)
+        # yt-dlp 网络兜底：无 socket_timeout 时慢源可把 worker 挂死数小时；
+        # retries/fragment_retries 让 yt-dlp 内部自愈，不消耗 Celery 重试次数
+        self._ydl_opts = {
+            **YDL_DEFAULT_OPTS,
+            "socket_timeout": float(s.download_socket_timeout_s),
+            "retries": int(s.download_retries),
+            "fragment_retries": int(s.download_retries),
+        }
 
     async def download(self, url: str, *, subdir: str | None = None) -> DownloadResult:
         """下载指定 URL 视频到本地，返回 DownloadResult。
@@ -100,6 +110,8 @@ class Downloader:
 
         out_dir = self._download_dir / (subdir or "")
         out_dir.mkdir(parents=True, exist_ok=True)
+        # 磁盘预检：720p 长视频可达数百 MB，盘满中途失败比开始前失败代价高
+        _check_disk_space(out_dir, self._min_free_gb)
 
         opts = {
             **self._ydl_opts,
@@ -118,7 +130,15 @@ class Downloader:
                 info = ydl.extract_info(url, download=True)
                 return info
 
-        await anyio.to_thread.run_sync(_do)
+        try:
+            await anyio.to_thread.run_sync(_do)
+        except Exception as e:
+            # 失败清理半成品：yt-dlp 的 .part/.ytdl 残留曾积数百 MB 磁盘垃圾；
+            # 重试从零下载，半成品无复用价值。只清 subdir 专属目录——
+            # subdir=None 时 out_dir 是共享下载根目录，绝不能删
+            if subdir:
+                shutil.rmtree(out_dir, ignore_errors=True)
+            raise _translate_download_error(e) from e
 
         local_path = _resolve_downloaded_path(out_dir, info)
         # 下载后计算 SHA256（content_hash 是去重键，需精确）
@@ -164,6 +184,63 @@ def get_downloader() -> Downloader:
 
 # ──────────────────────────── 辅助 ────────────────────────────
 
+# yt-dlp DownloadError 文本中的确定性失败标记（小写子串匹配）：
+# 视频 404/被删、私享、需登录、年龄墙、版权下架、地区封锁、不支持站点。
+# 分类边界放下载现场：这些站点语义只有 yt-dlp 的错误消息携带，任务层猜不到。
+_NONRETRYABLE_MARKERS: tuple[str, ...] = (
+    "404",
+    "not found",
+    "not available",      # 含 "not available in your country"（地区封锁变体）
+    # 收窄为 "video unavailable"：裸 "unavailable" 会误伤
+    # "HTTP Error 503: Service Unavailable"（暂时性服务端故障，应退避重试）
+    "video unavailable",
+    "private",         # "This video is private" / "private video"
+    "login", "sign in",  # 需登录（含多数年龄墙：sign in to confirm your age）
+    "age-restricted", "age restricted",
+    "unsupported url", "invalid url", "not a valid url",
+    "no video",        # 无可下载格式（纯音频/被过滤光）
+    "copyright",       # 版权下架
+    "removed",         # 被上传者/平台删除
+    "geo-restrict", "geo restricted",
+)
+
+
+def _translate_download_error(exc: Exception) -> Exception:
+    """yt-dlp DownloadError → 可重试/不可重试 二分翻译（见 videomind.core.errors）。
+
+    - 命中确定性标记（404/私享/需登录/地区封锁…）→ NonRetryableError：
+      退避重试改变不了资源不存在的事实，盲重 3 次纯浪费算力。
+    - 其余（网络抖动、源站 5xx、超时）→ RetryableError：退避后重试可恢复。
+    - 非 DownloadError 原样返回：socket/OSError 交由 BaseVideoTask autoretry 基类兜底。
+    """
+    try:
+        from yt_dlp.utils import DownloadError
+    except ImportError:
+        # yt-dlp 未安装：交由上层（原样抛出，import 错在调用侧更早暴露）
+        return exc
+    if not isinstance(exc, DownloadError):
+        return exc
+    msg = str(exc).lower()
+    if any(marker in msg for marker in _NONRETRYABLE_MARKERS):
+        return NonRetryableError(f"视频不可下载（确定性失败，不重试）: {exc}")
+    return RetryableError(f"下载暂时失败（退避重试可恢复）: {exc}")
+
+
+def _check_disk_space(out_dir: Path, min_free_gb: float) -> None:
+    """下载前磁盘预检：剩余空间不足 → RetryableError（磁盘释放后重试可恢复）。
+
+    预检本身失败（跨平台盘符/权限差异）不阻塞下载——真盘满时写入阶段仍会报错兜底。
+    """
+    try:
+        free_gb = shutil.disk_usage(out_dir).free / (1 << 30)
+    except OSError:
+        return
+    if free_gb < min_free_gb:
+        raise RetryableError(
+            f"磁盘剩余空间不足：{out_dir} 所在盘仅剩 {free_gb:.1f}GB"
+            f"（下限 {min_free_gb}GB），释放空间后重试即可恢复"
+        )
+
 
 def _resolve_downloaded_path(out_dir: Path, info: dict[str, Any]) -> Path:
     """yt-dlp 下载后定位实际产物路径。
@@ -180,7 +257,8 @@ def _resolve_downloaded_path(out_dir: Path, info: dict[str, Any]) -> Path:
         p = out_dir / f"{vid}.{e}"
         if p.exists():
             return p
-    raise FileNotFoundError(
+    # 契约违规（yt-dlp 行为变更/产物被外部移动）：确定性失败，重试无意义
+    raise NonRetryableError(
         f"yt-dlp 下载完成但找不到产物：{out_dir}/{vid}.{ext}"
     )
 

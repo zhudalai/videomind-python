@@ -100,7 +100,7 @@ class Transcoder:
         )
 
         # 4. 场景变化检测（感知哈希，预留给 frame_ocr）
-        scene_changes = await self._detect_scene_changes(video_local)
+        scene_changes = await self._detect_scene_changes(video_local, probe.duration_ms)
 
         # 5. 并行上传音频 + 关键帧到 MinIO
         import asyncio
@@ -108,6 +108,10 @@ class Transcoder:
             self._minio.upload_file(audio_name, audio_local),
             self._upload_keyframes(keyframes_local, content_hash),
         )
+
+        # 6. 产物已进 MinIO，本地临时工件使命完成即清（旧实现从不清理）。
+        #    失败路径不清：重试时 ffmpeg 同名覆盖生成，残留可接受且不误删在途文件
+        self._cleanup_artifacts(content_hash, video_path)
 
         return TranscodeResult(
             video_local=video_local,
@@ -124,11 +128,18 @@ class Transcoder:
             fps=probe.fps,
         )
 
-    async def _detect_scene_changes(self, video_path: Path | str) -> list[int]:
+    async def _detect_scene_changes(
+        self, video_path: Path | str, duration_ms: int
+    ) -> list[int]:
         """场景变化检测（感知哈希差异）。
 
         这里简化实现：用 ffmpeg 输出 1fps 帧，逐帧计算 phash 差异。
         返回场景切换时间点列表（毫秒）。
+
+        Args:
+            duration_ms: 视频总时长（execute 的 probe 结果）。显式传参——
+                旧实现兜底采样分支直接引用外层局部变量 probe → NameError
+                （装 Pillow/imagehash 且帧数 ≥2 时必炸）。
         """
         video_path = Path(video_path)
         # 复用抽帧结果
@@ -166,12 +177,33 @@ class Transcoder:
                 continue
 
         # 兜底：若检测点太少，按 MAX_INTERVAL 补采样
-        if len(scene_changes) < probe.duration_ms / (self.SCENE_MAX_INTERVAL * 1000) * 0.5:
+        if len(scene_changes) < duration_ms / (self.SCENE_MAX_INTERVAL * 1000) * 0.5:
             scene_changes = [
                 int(i * self.SCENE_MAX_INTERVAL * 1000)
-                for i in range(1, max(2, int(probe.duration_ms / (self.SCENE_MAX_INTERVAL * 1000))))
+                for i in range(1, max(2, int(duration_ms / (self.SCENE_MAX_INTERVAL * 1000))))
             ]
         return scene_changes
+
+    def _cleanup_artifacts(self, content_hash: str, video_path: Path) -> None:
+        """清理 transcode_temp 下本媒体的本地工件（音频/关键帧/场景检测帧）。
+
+        产物已上传 MinIO（后续 asr/ocr 都从 MinIO 拉取），本地副本无复用价值。
+        只在成功路径调用；清理失败仅忽略——不应让已成功的转码任务
+        因磁盘清理问题回滚成失败（残留可由运维脚本兜底处理）。
+        """
+        import shutil
+        for p in (
+            self._temp_dir / f"{content_hash}_audio.ogg",
+            self._temp_dir / f"{content_hash}_frames",
+            self._temp_dir / f"_scene_{video_path.stem}",
+        ):
+            try:
+                if p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    p.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     async def _upload_keyframes(
         self, keyframes: list[Path], content_hash: str

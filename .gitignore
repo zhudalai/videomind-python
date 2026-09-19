@@ -49,3 +49,7 @@ frontend/test-upload.spec.ts
 /ASR_PUNCTUATION_TEST_PLAN.md
 /upload-page.png
 /videos-*.png
+
+# 覆盖率数据文件
+.coverage
+coverage.xml

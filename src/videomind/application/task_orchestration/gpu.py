@@ -34,16 +34,22 @@ from videomind.observability.metrics import GPU_UTILIZATION
 
 @dataclass
 class GPUHandle:
-    """GPU 锁持有句柄。退出上下文时自动释放。"""
+    """GPU 锁持有句柄。退出上下文时自动释放。
+
+    _lock_value 在 acquire 时生成一次并全程复用 —— Lua 的"值匹配才动锁"
+    语义要求续租/释放用与写入时完全相同的值；若三处各自重新生成（旧实现），
+    GET==ARGV 永远失败：续租变空操作（超 TTL 任务互斥失效）、释放不删锁。
+    """
 
     task_id: str
     stage: str
     _manager: "GPUResourceManager"
+    _lock_value: str = ""
     _acquired: bool = True
 
     async def release(self) -> None:
         if self._acquired:
-            await self._manager.release(self.task_id, self.stage)
+            await self._manager.release(self.stage, self._lock_value)
             self._acquired = False
 
     async def __aenter__(self) -> "GPUHandle":
@@ -138,8 +144,8 @@ class GPUResourceManager:
                 continue
 
             if ok:
-                # 启动心跳续租任务
-                handle = GPUHandle(task_id, stage, self)
+                # 启动心跳续租任务；锁值随 handle 传递，续租/释放复用同一值
+                handle = GPUHandle(task_id, stage, self, _lock_value=value)
                 asyncio.create_task(self._heartbeat(handle))
                 # GPU 利用率置 100%（独占）
                 GPU_UTILIZATION.labels(device_id="0", stage=stage).set(100.0)
@@ -152,24 +158,23 @@ class GPUResourceManager:
                 )
             await asyncio.sleep(0.5)
 
-    async def release(self, task_id: str, stage: str) -> bool:
-        """释放 GPU 锁（仅持有者可释放）。"""
+    async def release(self, stage: str, lock_value: str) -> bool:
+        """释放 GPU 锁（仅持有者可释放——需带上 acquire 时写入的锁值）。"""
         await self._ensure_scripts()
         key = self._lock_key(stage)
-        value = self._lock_value(task_id)
         try:
-            result = await self._redis.evalsha(self._sha_release, 1, key, value)
+            result = await self._redis.evalsha(self._sha_release, 1, key, lock_value)
             # GPU 利用率置 0%
             GPU_UTILIZATION.labels(device_id="0", stage=stage).set(0.0)
             return result == 1
         except aioredis.NoScriptError:
             await self._ensure_scripts()
-            return await self.release(task_id, stage)
+            return await self.release(stage, lock_value)
 
     async def _heartbeat(self, handle: GPUHandle) -> None:
         """后台心跳：定期刷新锁 TTL。"""
         key = self._lock_key(handle.stage)
-        value = self._lock_value(handle.task_id)
+        value = handle._lock_value
 
         try:
             while handle._acquired:
