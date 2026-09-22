@@ -45,18 +45,30 @@ class TestInjectExtractTraceContext:
     def test_inject_populates_traceparent_header(self):
         """Carrier gets traceparent header in W3C format."""
         carrier = {}
-        with self.tracer.start_as_current_span("test"):
+
+        with self.tracer.start_as_current_span("test") as span:
             inject_trace_context(carrier)
 
         assert "traceparent" in carrier
         traceparent = carrier["traceparent"]
+
         # W3C format: version-trace-id-span-id-flags
         parts = traceparent.split("-")
         assert len(parts) == 4
         assert parts[0] == "00"  # version
         assert len(parts[1]) == 32  # trace-id 16 bytes = 32 hex
         assert len(parts[2]) == 16  # span-id 8 bytes = 16 hex
-        assert parts[3] in ("01", "00")  # flags
+
+        # flags 是一个字节的十六进制值。OpenTelemetry 会设置额外的已定义标志位
+        # （1.44 起实测为 0x03），因此不能限定为 "00"/"01"。
+        flags = parts[3]
+        assert len(flags) == 2
+        assert all(char in "0123456789abcdefABCDEF" for char in flags)
+
+        # 真正该守住的不变量：sampled 位必须与当前 span 一致。
+        assert (int(flags, 16) & int(TraceFlags.SAMPLED)) == (
+            int(span.get_span_context().trace_flags) & int(TraceFlags.SAMPLED)
+        )
 
     def test_inject_populates_tracestate_header(self):
         """Carrier may get tracestate header."""
