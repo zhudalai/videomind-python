@@ -16,7 +16,7 @@
 | [MODEL-GATEWAY.md](docs/MODEL-GATEWAY.md) | 模型网关：三态熔断、优先级路由、首包探测、Token 计费、多供应商抽象 | `core/model_gateway/` |
 | [TASK-ORCHESTRATION.md](docs/TASK-ORCHESTRATION.md) | 任务编排：Celery+Redis、状态机、幂等、重试预算、SSE 阶段推送 | `application/task_orchestration/` |
 | [INTENT-ROUTING.md](docs/INTENT-ROUTING.md) | 意图识别树、查询改写拆分、多通道检索编排 | `core/intent/` |
-| [FRONTEND.md](docs/FRONTEND.md) | 前端工作台：视频库、Agent 工作台、流式 Markdown、证据卡片、键盘快捷键（⚠️ 该文档仍写作 Vue 3，实际实现为 React 18，见下方说明） | `frontend/` |
+| [FRONTEND.md](docs/FRONTEND.md) | 前端工作台：路由、TanStack Query 状态层、axios API 层、SSE 管线进度、9 个页面、测试与构建（**已按实际 React 实现重写**） | `frontend/` |
 | [SECURITY.md](docs/SECURITY.md) | JWT 鉴权、API Key AES-GCM 加密、速率限流、审计日志、CORS/CSRF | `interface/` + `infrastructure/` |
 | [OBSERVABILITY.md](docs/OBSERVABILITY.md) | 结构化日志、Prometheus 指标、Grafana 看板、全链路 Trace、离线评测框架 | `observability/` |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker Compose 一键起、环境变量、GPU 直通、MinIO/Qdrant/Ollama 本地化部署 | 运维 |
@@ -43,7 +43,7 @@
 | **向量模型** | BGE-M3 / BAAI 系列 | Sentence-Transformers 封装；重排用 `BAAI/bge-reranker-v2-m3` |
 | **重排** | OpenRouter `/rerank` 端点 + 本地 BGE 双路径 | `rerank_backend.py` 按可用性选择后端 |
 | **本地 LLM** | Ollama (Qwen2.5-7B INT4) | ⏳ **仅预留**：`embed.py` API 路径为 TODO 占位，未接通 |
-| **前端** | **React 18 + TypeScript + Vite + SSE** | Zustand + TanStack Query + Tailwind + Radix UI |
+| **前端** | **React 18 + TypeScript + Vite + SSE** | 状态层为 **TanStack Query**（服务端状态）+ `useState`；Tailwind + Radix；无状态库（zustand 依赖存在但零引用） |
 
 ---
 
@@ -109,7 +109,6 @@
 
 | 项 | 文档旧说法 | 实际实现 |
 |---|---|---|
-| 前端框架 | Vue 3 + Pinia（FRONTEND.md 仍如此） | **React 18 + TypeScript + Zustand**（`frontend/src/**/*.tsx`，无 `.vue` 文件） |
 | ASR | openai-whisper | **faster-whisper** + Groq API 双路径 |
 | RAG 编排 | LlamaIndex | **自研**（无 LlamaIndex 依赖） |
 | Agent 编排 | 自研 + LangChain 工具集成 | **纯自研**（无 LangChain 依赖） |
