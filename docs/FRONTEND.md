@@ -1,921 +1,410 @@
-# VideoMind 前端工作台设计
+# VideoMind 前端工作台设计（React 实现版）
 
-> Vue 3 + Vite + SSE 实时工作台：视频库管理、Agent 分析工作台、流式 Markdown 渲染、证据卡片、键盘快捷键
-> 核心参考：Ragent `web/` + DOVideo-AI 前端 + VidLens UI 组件库
-
----
-
-## 1. 前端架构总览
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            VideoMind Web Workbench                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  App Shell (Layout)                                                 │   │
-│  │  ┌─────────┐ ┌─────────────────────────────────────────────────┐  │   │
-│  │  │ Sidebar │ │              Main View (RouterView)              │  │   │
-│  │  │         │ │  ┌─────────────┐ ┌─────────────┐ ┌───────────┐  │  │   │
-│  │  │ Navigation│ │  Video      │ │  Agent      │ │  RAG      │  │  │   │
-│  │  │  Tree     │ │  Library    │ │  Workbench  │ │  Chat     │  │  │   │
-│  │  │           │ │  (Grid/List)│ │  (SSE Stream)          │  │  │   │
-│  │  └─────────┘ └─────────────────────────────────────────────────┘  │   │
-│  │  ┌─────────────────────────────────────────────────────────────┐  │   │
-│  │  │  Global SSE Connection Manager (EventSource + Reconnect)   │  │   │
-│  │  └─────────────────────────────────────────────────────────────┘  │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-            ┌────────────┐  ┌────────────┐  ┌────────────┐
-            │  FastAPI   │  │  FastAPI   │  │  FastAPI   │
-            │  /api/v1/  │  │  /api/v1/  │  │  /api/v1/  │
-            │  videos    │  │  tasks     │  │  rag       │
-            │  (REST)    │  │  (SSE)     │  │  (SSE)     │
-            └────────────┘  └────────────┘  └────────────┘
-```
+> React 18 + TypeScript + Vite + SSE 实时工作台：视频库管理、视频上传、管线进度监控、RAG 问答、Agent 分析、健康看板
+> **本文档描述当前代码的实际实现。** 设计稿中规划但尚未落地的部分集中在 [§12](#12-未实装--设计稿遗留)，请勿据本文档之外的内容推断已有能力。
+> 早期设计参考：Ragent `web/` + DOVideo-AI 前端 + VidLens UI 组件库
 
 ---
 
-## 2. 技术栈与依赖
+## 1. 技术栈与依赖
+
+`frontend/package.json`（package name `videomind-frontend`，`"type": "module"`）：
 
 ```json
 {
   "dependencies": {
-    "vue": "^3.4.0",
-    "vue-router": "^4.3.0",
-    "pinia": "^2.1.0",
-    "@vueuse/core": "^10.9.0",
-    "markdown-it": "^14.1.0",
-    "katex": "^0.16.9",
-    "mermaid": "^10.9.0",
-    "hljs": "^11.9.0",
-    "axios": "^1.6.0",
-    "mitt": "^3.0.1"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "@tanstack/react-query": "^5.56.2",
+    "axios": "^1.7.7",
+    "i18next": "^26.3.6",
+    "react-i18next": "^17.0.11",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "react-hook-form": "^7.53.0",
+    "@hookform/resolvers": "^3.9.0",
+    "zod": "^3.23.8",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.2",
+    "@radix-ui/react-scroll-area": "^1.1.0",
+    "lucide-react": "^0.441.0",
+    "recharts": "^2.12.7"
   },
   "devDependencies": {
-    "vite": "^5.2.0",
-    "@vitejs/plugin-vue": "^5.0.0",
-    "typescript": "^5.4.0",
-    "vue-tsc": "^2.0.0",
-    "tailwindcss": "^3.4.0",
-    "@headlessui/vue": "^1.7.0",
-    "@heroicons/vue": "^2.1.0"
+    "vite": "^5.4.6",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.6.2",
+    "tailwindcss": "^3.4.11",
+    "tailwindcss-animate": "^1.0.7",
+    "postcss": "^8.4.45",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.10.0",
+    "prettier": "^3.3.3",
+    "vitest": "^2.1.1",
+    "jsdom": "^25.0.0",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/jest-dom": "^6.5.0",
+    "@playwright/test": "^1.47.2",
+    "@tanstack/react-query-devtools": "^5.101.4"
   }
 }
 ```
 
+> ⚠️ `zustand`、`markdown-it`、`highlight.js`、`date-fns` 虽在 `dependencies` 中，但**源码中零引用**。详见 [§12](#12-未实装--设计稿遗留)。
+
 ---
 
-## 3. 核心页面与路由
+## 2. 目录结构
 
-```typescript
-// router/index.ts
-const routes = [
-  {
-    path: '/',
-    redirect: '/library'
-  },
-  {
-    path: '/library',
-    name: 'VideoLibrary',
-    component: () => import('@/views/VideoLibrary.vue'),
-    meta: { title: '视频库', icon: 'video-camera' }
-  },
-  {
-    path: '/library/:videoId',
-    name: 'VideoDetail',
-    component: () => import('@/views/VideoDetail.vue'),
-    meta: { title: '视频详情', hideInMenu: true }
-  },
-  {
-    path: '/analysis',
-    name: 'AnalysisWorkbench',
-    component: () => import('@/views/AnalysisWorkbench.vue'),
-    meta: { title: 'Agent 分析', icon: 'cpu-chip' }
-  },
-  {
-    path: '/analysis/:taskId',
-    name: 'AnalysisSession',
-    component: () => import('@/views/AnalysisSession.vue'),
-    meta: { title: '分析会话', hideInMenu: true }
-  },
-  {
-    path: '/rag',
-    name: 'RAGChat',
-    component: () => import('@/views/RAGChat.vue'),
-    meta: { title: '智能问答', icon: 'chat-bubble-left-right' }
-  },
-  {
-    path: '/settings',
-    name: 'Settings',
-    component: () => import('@/views/Settings.vue'),
-    meta: { title: '设置', icon: 'cog-6-tooth' }
-  }
-]
+`frontend/src/` 共 37 个文件。**没有** `src/store/`、`src/pages/`、`src/router/` 目录。
+
+```
+frontend/src/
+├── main.tsx                     # 入口：Provider 装配
+├── vite-env.d.ts                # ImportMetaEnv 类型（VITE_API_BASE）
+├── app/
+│   └── App.tsx                  # <Routes> 路由表（唯一路由定义处）
+├── components/
+│   ├── layout/
+│   │   ├── index.ts             # 再导出 MainLayout as Layout
+│   │   ├── MainLayout.tsx       # 应用外壳：Sidebar + Header + <Outlet/>
+│   │   ├── Sidebar.tsx          # 可折叠导航栏（7 项 NavLink）
+│   │   └── Header.tsx           # 顶栏：搜索框 / 主题切换 / 通知
+│   └── ui/                      # UI 原语（Button/Badge/Card/Input/Label/
+│                                #   Progress/Tabs/Textarea/ScrollArea/PlaceholderPage）
+├── contexts/
+│   └── LanguageContext.tsx      # 语言上下文（含一次性 DB 同步）
+├── features/                    # 页面级组件，一目录一页面
+│   ├── dashboard/Dashboard.tsx
+│   ├── video-upload/VideoUploadPage.tsx
+│   ├── video-library/VideoLibraryPage.tsx
+│   ├── video-library/VideoDetailPage.tsx
+│   ├── pipeline-monitor/PipelineProgressPage.tsx
+│   ├── rag-chat/RAGChatPage.tsx
+│   ├── agent-analysis/AgentAnalysisPage.tsx
+│   ├── health-dashboard/HealthDashboardPage.tsx
+│   └── settings/SettingsPage.tsx
+├── hooks/
+│   ├── useApi.ts                # QUERY_KEYS 工厂 + 20 个 hooks（⚠️ 无引用）
+│   └── useSSE.ts                # usePipelineSSE / useEventSource（⚠️ 无引用）
+├── i18n/
+│   ├── index.ts                 # i18next 初始化
+│   ├── en-US.json
+│   └── zh-CN.json
+├── lib/
+│   ├── api.ts                   # axios 实例 + 6 个 endpoint group（实际使用）
+│   ├── endpoints.ts             # ENDPOINTS 常量表（⚠️ 无引用）
+│   └── utils.ts                 # cn()、格式化、阶段映射、缩略图
+├── styles/
+│   └── globals.css              # 设计 token + .prose + .scrollbar-hide
+└── types/
+    └── api.ts                   # Zod schema + z.infer 导出类型
+```
+
+**设计取向**：按**功能域**（`features/<domain>/`）而非按技术类型（views / components / stores）切分，页面内聚、彼此不共享中间组件。UI 原语集中在 `components/ui/`。
+
+---
+
+## 3. 路由
+
+React Router v6 **声明式 `<Routes>`**（非 `createBrowserRouter`，无独立路由配置文件）。定义于 `frontend/src/app/App.tsx`：
+
+```tsx
+<Routes>
+  <Route path="/" element={<Layout />}>            {/* MainLayout */}
+    <Route index element={<Dashboard />} />
+    <Route path="upload" element={<VideoUploadPage />} />
+    <Route path="videos" element={<VideoLibraryPage />} />
+    <Route path="videos/:id" element={<VideoDetailPage />} />
+    <Route path="videos/:id/progress" element={<PipelineProgressPage />} />
+    <Route path="chat" element={<RAGChatPage />} />
+    <Route path="analysis" element={<AgentAnalysisPage />} />
+    <Route path="health" element={<HealthDashboardPage />} />
+    <Route path="settings" element={<SettingsPage />} />
+  </Route>
+  <Route path="*" element={<Navigate to="/" replace />} />
+</Routes>
+```
+
+| 路径 | 页面 | 说明 |
+|---|---|---|
+| `/` | `Dashboard` | 首页：健康卡片 + 快捷入口 + 最近视频 |
+| `/upload` | `VideoUploadPage` | URL / 本地文件双 Tab 上传 |
+| `/videos` | `VideoLibraryPage` | 视频库网格 |
+| `/videos/:id` | `VideoDetailPage` | 详情：转写 / 分段 / OCR 三 Tab |
+| `/videos/:id/progress` | `PipelineProgressPage` | 管线进度（SSE） |
+| `/chat` | `RAGChatPage` | RAG 问答 |
+| `/analysis` | `AgentAnalysisPage` | Agent 分析工作台 |
+| `/health` | `HealthDashboardPage` | 依赖组件健康看板 |
+| `/settings` | `SettingsPage` | 用户配置 |
+
+**Provider 装配顺序**（`main.tsx`）：
+
+```
+React.StrictMode
+└─ QueryClientProvider        (+ ReactQueryDevtools)
+   └─ I18nextProvider
+      └─ LanguageProvider
+         └─ BrowserRouter
+            └─ App
 ```
 
 ---
 
 ## 4. 状态管理
 
-### 4.1 视频库 Store
+### 4.1 TanStack Query 是唯一的状态层
 
-```typescript
-// stores/videoLibrary.ts
-export const useVideoLibraryStore = defineStore('videoLibrary', () => {
-  const videos = ref<Video[]>([])
-  const loading = ref(false)
-  const filters = ref<VideoFilter>({
-    query: '',
-    status: 'all',
-    dateRange: null,
-    tags: []
-  })
-  const pagination = ref({ page: 1, pageSize: 20, total: 0 })
-  
-  async function fetchVideos() {
-    loading.value = true
-    try {
-      const res = await api.videos.list({
-        ...filters.value,
-        page: pagination.value.page,
-        page_size: pagination.value.pageSize
-      })
-      videos.value = res.items
-      pagination.value.total = res.total
-    } finally {
-      loading.value = false
-    }
-  }
-  
-  async function deleteVideo(id: string) {
-    await api.videos.delete(id)
-    await fetchVideos()
-  }
-  
-  async function reIngestVideo(id: string) {
-    await api.tasks.create({ type: 'ingestion', video_id: id })
-    // SSE 进度在 TaskMonitor 中处理
-  }
-  
-  return { videos, loading, filters, pagination, fetchVideos, deleteVideo, reIngestVideo }
+`QueryClient` 在 `main.tsx` 内联创建：
+
+```ts
+new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,      // 5 分钟
+      gcTime: 30 * 60 * 1000,        // 30 分钟
+      retry: (failureCount, error) =>
+        error?.status === 404 ? false : failureCount < 3,
+      refetchOnWindowFocus: false,
+    },
+  },
 })
 ```
 
-### 4.2 SSE 任务监控 Store
+- **服务端状态** → TanStack Query（查询 / 变更 / 轮询）
+- **UI 局部状态** → `useState`（聊天消息、表单、筛选条件）
+- **跨组件状态** → 仅 `LanguageContext` 一个 React Context
+- **Zustand 未使用**：依赖存在但无 store 文件、无 import；Vite/TS 中的 `@/store` 别名指向**不存在的目录**
 
-```typescript
-// stores/taskMonitor.ts
-export const useTaskMonitorStore = defineStore('taskMonitor', () => {
-  const activeTasks = ref<Map<string, TaskProgress>>(new Map())
-  const eventSources = ref<Map<string, EventSource>>(new Map())
-  const emitter = mitt<TaskEvents>()
-  
-  function connect(taskId: string) {
-    if (eventSources.value.has(taskId)) return
-    
-    const es = new EventSource(`/api/v1/tasks/${taskId}/stream`, {
-      withCredentials: true
-    })
-    
-    es.onmessage = (event) => {
-      const data = JSON.parse(event.data) as TaskProgress
-      activeTasks.value.set(taskId, data)
-      emitter.emit('progress', taskId, data)
-      
-      if (data.phase === 'COMPLETED' || data.phase === 'FAILED') {
-        disconnect(taskId)
-      }
-    }
-    
-    es.onerror = () => {
-      // 自动重连逻辑
-      scheduleReconnect(taskId)
-    }
-    
-    eventSources.value.set(taskId, es)
-  }
-  
-  function disconnect(taskId: string) {
-    const es = eventSources.value.get(taskId)
-    if (es) {
-      es.close()
-      eventSources.value.delete(taskId)
-    }
-  }
-  
-  function getProgress(taskId: string) {
-    return activeTasks.value.get(taskId)
-  }
-  
-  return { activeTasks, connect, disconnect, getProgress, on: emitter.on }
+### 4.2 轮询策略
+
+部分状态没有 SSE 推送，改用 `refetchInterval` 轮询：
+
+| 场景 | 位置 | 间隔 | 条件 |
+|---|---|---|---|
+| Agent 任务状态 | `AgentAnalysisPage.tsx:67-75` | 2000ms | 仅 `pending`/`planning`/`executing`/`critic_check` |
+| 健康检查 | `HealthDashboardPage.tsx:46-50` | 30000ms | 常驻 |
+| 管线状态（REST 兜底） | `PipelineProgressPage.tsx:221` | 5000ms | 与 SSE 并行 |
+
+---
+
+## 5. API 层
+
+### 5.1 axios 实例
+
+`frontend/src/lib/api.ts:12-20`：
+
+```ts
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE || '/api',
+  timeout: 30000,
+  headers: { 'Content-Type': 'application/json' },
 })
 ```
 
+`frontend/.env` 内容为 `VITE_API_BASE=/api`（无 `.env.development` / `.env.production` 变体）。开发态由 Vite proxy 转发到后端。
+
+### 5.2 拦截器
+
+- **请求**：若 `localStorage.access_token` 存在则注入 `Authorization: Bearer <token>`
+- **响应**：**解包 `response.data`**，调用方直接拿到 payload
+- **错误**：统一规范为 `Error & { status?, detail? }`，`detail` 取自 FastAPI 的 `data.detail`
+- **401**：清除本地 token
+
+### 5.3 Endpoint 分组
+
+全部相对于 `/api`。与后端路由（`src/videomind/interface/routes/`）逐一对齐：
+
+| 分组 | 方法 + 路径 | 对应后端 |
+|---|---|---|
+| `pipelineApi` | `POST /videos/pipeline` | `video.py:236` 提交 URL 管线 |
+| | `POST /videos/upload` | `video.py:88` multipart 上传（带 `onUploadProgress`） |
+| | `GET /videos/pipeline/{mediaId}` | `video.py:265` 管线状态 |
+| `videoApi` | `GET /videos` | `video.py:441` 列表（page/page_size/search/status） |
+| | `GET \| DELETE /videos/{id}` | `video.py:499` / `:559` |
+| | `GET /videos/{id}/transcription` | `video.py:580` |
+| | `GET /videos/{id}/segments` | `video.py:601` |
+| | `GET /videos/{id}/ocr` | `video.py:639` |
+| `analysisApi` | `POST /agent/analyze` | `agent.py:105`（202） |
+| | `GET /agent/tasks/{taskId}` | `agent.py:201` |
+| | `GET /agent/tasks/{taskId}/result` | `agent.py:220` |
+| | `GET /agent/tasks/{taskId}/checkpoints` | `agent.py:237` |
+| `ragApi` | `POST /rag/search` | `rag.py:64` |
+| | `POST /rag/chat` | `rag.py:109` → `{answer, evidence[], session_id}` |
+| `healthApi` | `GET /health` / `GET /health/ready` | `health.py:14` / `:20` |
+| `userApi` | `GET \| PUT /user/config` | `user.py:92` / `:104` |
+
+> 早期设计稿使用 `/api/v1/...` 前缀，**实际后端为 `/api`**（`interface/__init__.py:72-77`）。
+
 ---
 
-## 5. 核心组件
+## 6. 实时进度（SSE）
 
-### 5.1 视频库网格/列表
+### 6.1 机制：原生 `EventSource`
 
-```vue
-<!-- components/video/VideoGrid.vue -->
-<script setup lang="ts">
-interface Props {
-  videos: Video[]
-  viewMode: 'grid' | 'list'
-  onPlay: (video: Video) => void
-  onAnalyze: (video: Video) => void
-  onDelete: (video: Video) => void
-}
+仅用于**管线进度**。全前端无 `fetch + ReadableStream`，也**没有 token 级的答案流式输出**。
 
-const props = defineProps<Props>()
-const emit = defineEmits<{}>()
+实现位于 `frontend/src/features/pipeline-monitor/PipelineProgressPage.tsx:139-199`：
 
-const formatDuration = (sec: number) => {
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = sec % 60
-  return h > 0 ? `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}` : `${m}:${s.toString().padStart(2,'0')}`
-}
-</script>
+```ts
+const apiBase = import.meta.env.VITE_API_BASE || '/api'
+const es = new EventSource(`${apiBase}/videos/pipeline/${mediaId}/progress`)
 
-<template>
-  <div class="video-grid" :class="viewMode">
-    <VideoCard
-      v-for="video in videos"
-      :key="video.id"
-      :video="video"
-      :view-mode="viewMode"
-      @play="onPlay"
-      @analyze="onAnalyze"
-      @delete="onDelete"
-    />
-  </div>
-  
-  <div v-if="!videos.length" class="empty-state">
-    <HeroIcon name="video-camera-slash" class="h-12 w-12 text-gray-400" />
-    <p class="mt-2 text-gray-500">暂无视频，点击「添加视频」开始</p>
-  </div>
-</template>
-```
-
-```vue
-<!-- components/video/VideoCard.vue -->
-<script setup lang="ts">
-interface Props {
-  video: Video
-  viewMode: 'grid' | 'list'
-}
-
-const props = defineProps<Props>()
-const emit = defineEmits<{ play: [Video], analyze: [Video], delete: [Video] }>()
-
-const statusColors: Record<string, string> = {
-  completed: 'bg-green-100 text-green-700',
-  processing: 'bg-yellow-100 text-yellow-700',
-  failed: 'bg-red-100 text-red-700',
-  pending: 'bg-gray-100 text-gray-700'
-}
-</script>
-
-<template>
-  <article class="video-card group relative bg-white rounded-xl border border-gray-200 overflow-hidden transition-shadow hover:shadow-lg" :class="{ 'flex flex-row': viewMode === 'list', 'flex-col': viewMode === 'grid' }">
-    <!-- 缩略图 -->
-    <div class="relative aspect-video bg-gray-100 overflow-hidden" :class="{ 'w-full': viewMode === 'grid', 'w-64 flex-shrink-0': viewMode === 'list' }">
-      <img :src="video.thumbnail_url" :alt="video.title" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
-      
-      <!-- 播放图标覆盖 -->
-      <button @click="emit('play', props.video)" class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-        <HeroIcon name="play-circle" class="h-16 w-16 text-white" />
-      </button>
-      
-      <!-- 状态徽章 -->
-      <span class="absolute top-2 right-2 px-2 py-1 text-xs font-medium rounded-full" :class="statusColors[video.status]">
-        {{ video.status }}
-      </span>
-      
-      <!-- 时长 -->
-      <span class="absolute bottom-2 right-2 px-1.5 py-0.5 text-xs bg-black/70 text-white rounded">
-        {{ formatDuration(video.duration) }}
-      </span>
-    </div>
-    
-    <!-- 信息区 -->
-    <div class="p-4 flex-1 flex flex-col" :class="{ 'min-w-0': viewMode === 'list' }">
-      <h3 class="font-semibold text-gray-900 line-clamp-2" :class="{ 'line-clamp-1': viewMode === 'list' }">{{ video.title }}</h3>
-      
-      <div class="mt-2 flex items-center gap-3 text-sm text-gray-500">
-        <span class="flex items-center gap-1">
-          <HeroIcon name="user-circle" class="h-4 w-4" />
-          {{ video.author }}
-        </span>
-        <span class="flex items-center gap-1">
-          <HeroIcon name="calendar-days" class="h-4 w-4" />
-          {{ formatDate(video.published_at) }}
-        </span>
-      </div>
-      
-      <p v-if="video.description" class="mt-2 text-sm text-gray-600 line-clamp-2" :class="{ 'line-clamp-1': viewMode === 'list' }">{{ video.description }}</p>
-      
-      <!-- 标签 -->
-      <div class="mt-3 flex flex-wrap gap-1">
-        <span v-for="tag in video.tags.slice(0, 4)" :key="tag" class="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">{{ tag }}</span>
-        <span v-if="video.tags.length > 4" class="px-2 py-0.5 text-xs bg-gray-100 text-gray-400 rounded">+{{ video.tags.length - 4 }}</span>
-      </div>
-      
-      <!-- 操作按钮 -->
-      <div class="mt-4 flex items-center gap-2 pt-3 border-t border-gray-100">
-        <button @click="emit('analyze', props.video)" class="flex-1 btn-primary text-sm py-1.5">
-          <HeroIcon name="sparkles" class="h-4 w-4 mr-1" />
-          分析
-        </button>
-        <button @click="emit('delete', props.video)" class="btn-ghost text-sm py-1.5 px-3 text-red-600 hover:bg-red-50">
-          <HeroIcon name="trash" class="h-4 w-4" />
-        </button>
-      </div>
-    </div>
-  </article>
-</template>
-```
-
-### 5.2 Agent 分析工作台（SSE 流式）
-
-```vue
-<!-- views/AnalysisWorkbench.vue -->
-<script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useTaskMonitorStore } from '@/stores/taskMonitor'
-import { useVideoLibraryStore } from '@/stores/videoLibrary'
-import StreamingMarkdown from '@/components/analysis/StreamingMarkdown.vue'
-import EvidenceCard from '@/components/analysis/EvidenceCard.vue'
-import PhaseIndicator from '@/components/analysis/PhaseIndicator.vue'
-
-const route = useRoute()
-const router = useRouter()
-const taskMonitor = useTaskMonitorStore()
-const videoLibrary = useVideoLibraryStore()
-
-const taskId = ref(route.params.taskId as string)
-const goal = ref('')
-const videoId = ref('')
-const phases = ref<TaskPhase[]>([])
-const currentPhase = ref('')
-const answer = ref('')
-// 证据卡片数据契约（与后端 AGENT-LOOP Evidence 对齐：后端字段 id 在前端序列化为 evidence_id）
-interface Evidence {
-  evidence_id: string    // = 后端 Evidence.id，EID_{chunk_id[:8]}_{idx:02d}（INTENT-ROUTING make_evidence_id 产出）
-  timestamp_ms: number    // 视频时间戳（毫秒）
-  source: 'asr' | 'ocr' | 'frame'
-  content: string        // 原文片段（≤500）
-  chunk_id: string       // UUID，关联 chunk 表，用于跳转视频片段
-}
-
-const evidence = ref<Evidence[]>([])
-const isStreaming = ref(false)
-const error = ref('')
-
-async function startAnalysis() {
-  if (!videoId.value || !goal.value.trim()) return
-  
-  try {
-    isStreaming.value = true
-    error.value = ''
-    answer.value = ''
-    evidence.value = []
-    phases.value = []
-    
-    const res = await api.tasks.create({
-      type: 'analysis',
-      video_id: videoId.value,
-      goal: goal.value
-    })
-    
-    taskId.value = res.task_id
-    router.replace({ name: 'AnalysisSession', params: { taskId: res.task_id } })
-    
-    // 连接 SSE
-    taskMonitor.connect(res.task_id)
-    taskMonitor.on('progress', handleProgress)
-    
-  } catch (e) {
-    error.value = e.message
-    isStreaming.value = false
-  }
-}
-
-function handleProgress(taskId: string, progress: TaskProgress) {
-  currentPhase.value = progress.phase
-  phases.value = progress.phases
-  
-  if (progress.phase === 'EXECUTING' && progress.partial_answer) {
-    answer.value = progress.partial_answer
-  }
-  
-  if (progress.evidence) {
-    evidence.value = progress.evidence
-  }
-  
-  if (progress.phase === 'COMPLETED') {
-    isStreaming.value = false
-    answer.value = progress.final_answer
-    evidence.value = progress.evidence
-  } else if (progress.phase === 'FAILED') {
-    isStreaming.value = false
-    error.value = progress.error
-  }
-}
-
-onUnmounted(() => {
-  if (taskId.value) taskMonitor.disconnect(taskId.value)
-})
-</script>
-
-<template>
-  <div class="analysis-workbench h-screen flex flex-col">
-    <!-- 顶部栏 -->
-    <header class="bg-white border-b border-gray-200 px-6 py-4">
-      <div class="max-w-7xl mx-auto flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-900">Agent 视频分析工作台</h1>
-        <PhaseIndicator :phases="phases" :current="currentPhase" />
-      </div>
-    </header>
-    
-    <main class="flex-1 overflow-hidden flex">
-      <!-- 左侧：视频选择 + 目标输入 -->
-      <aside class="w-96 bg-gray-50 border-r border-gray-200 p-6 overflow-y-auto" v-if="!taskId">
-        <div class="space-y-6">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">选择视频</label>
-            <VideoSelector v-model="videoId" :videos="videoLibrary.videos" />
-          </div>
-          
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">分析目标</label>
-            <textarea v-model="goal" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" 
-              placeholder="例如：总结视频核心观点，并指出论据是否充分&#10;例如：找出视频中提到的所有数据指标及其来源&#10;例如：对比视频前后两个版本方案的优劣" />
-            <p class="mt-1 text-xs text-gray-500">支持复杂推理、跨片段对比、因果分析等</p>
-          </div>
-          
-          <button @click="startAnalysis" :disabled="!videoId || !goal.trim() || isStreaming" class="w-full btn-primary py-3 text-lg">
-            <span v-if="isStreaming" class="flex items-center justify-center gap-2">
-              <HeroIcon name="spinner" class="h-5 w-5 animate-spin" />
-              启动中...
-            </span>
-            <span v-else>开始分析</span>
-          </button>
-          
-          <div v-if="error" class="text-red-600 text-sm p-3 bg-red-50 rounded">{{ error }}</div>
-        </div>
-      </aside>
-      
-      <!-- 右侧：流式结果区 -->
-      <section class="flex-1 flex flex-col overflow-hidden" v-if="taskId">
-        <!-- 进行中提示 -->
-        <div v-if="isStreaming && currentPhase" class="p-4 bg-blue-50 border-b border-blue-100">
-          <div class="flex items-center gap-2 text-blue-700">
-            <HeroIcon name="arrow-path" class="h-5 w-5 animate-spin" />
-            <span>正在执行：{{ currentPhase }}...</span>
-          </div>
-        </div>
-        
-        <!-- 结果区 -->
-        <div class="flex-1 overflow-y-auto p-6 space-y-6">
-          <!-- 流式 Markdown 回答 -->
-          <div class="prose prose-lg max-w-none" v-if="answer">
-            <StreamingMarkdown :content="answer" :is-streaming="isStreaming" />
-          </div>
-          
-          <!-- 证据卡片 -->
-          <div v-if="evidence.length" class="border-t border-gray-200 pt-6">
-            <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <HeroIcon name="document-magnifying-glass" class="h-5 w-5" />
-              引用证据 ({{ evidence.length }})
-            </h3>
-            <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              <EvidenceCard v-for="e in evidence" :key="e.evidence_id" :evidence="e" />
-            </div>
-          </div>
-          
-          <div v-else-if="!isStreaming && !answer" class="text-center py-12 text-gray-500">
-            <HeroIcon name="sparkles" class="h-12 w-12 mx-auto text-gray-300" />
-            <p class="mt-2">分析完成后将在此显示结果</p>
-          </div>
-        </div>
-        
-        <!-- 底部操作栏 -->
-        <div class="p-4 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3">
-          <button @click="copyAnswer" class="btn-secondary" :disabled="!answer">
-            <HeroIcon name="document-duplicate" class="h-4 w-4 mr-1" />
-            复制回答
-          </button>
-          <button @click="exportMarkdown" class="btn-secondary" :disabled="!answer">
-            <HeroIcon name="arrow-down-tray" class="h-4 w-4 mr-1" />
-            导出 Markdown
-          </button>
-          <router-link :to="{ name: 'AnalysisWorkbench' }" class="btn-primary">
-            <HeroIcon name="plus" class="h-4 w-4 mr-1" />
-            新建分析
-          </router-link>
-        </div>
-      </section>
-    </main>
-  </div>
-</template>
-```
-
-### 5.3 流式 Markdown 渲染器
-
-```vue
-<!-- components/analysis/StreamingMarkdown.vue -->
-<script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
-import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github-dark.css'
-import katex from 'katex'
-import 'katex/dist/katex.min.css'
-import mermaid from 'mermaid'
-
-const props = defineProps<{
-  content: string
-  isStreaming: boolean
-}>()
-
-const containerRef = ref<HTMLDivElement>()
-const md = ref<MarkdownIt>()
-
-onMounted(() => {
-  md.value = new MarkdownIt({
-    html: true,
-    linkify: true,
-    typographer: true,
-    highlight: (str, lang) => {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(str, { language: lang }).value
-      }
-      return ''
-    }
-  })
-  
-  // 数学公式
-  md.value.use(require('markdown-it-katex'), { katex })
-  
-  // Mermaid 图表
-  md.value.use(require('markdown-it-mermaid'), { mermaid })
-  
-  mermaid.initialize({ startOnLoad: false, theme: 'default' })
-  
-  render()
+// 监听具名事件 'progress'（非 onmessage）
+es.addEventListener('progress', (event) => {
+  const progressEvent: ProgressEvent = JSON.parse(event.data)
+  setSseEvents(prev => [...prev, progressEvent])
+  if (progressEvent.stage === 'completed' || progressEvent.progress_pct >= 100) es.close()
+  else if (progressEvent.stage === 'failed' || progressEvent.progress_pct < 0) es.close()
 })
 
-watch(() => props.content, () => {
-  if (!props.isStreaming) {
-    // 非流式时防抖渲染
-    clearTimeout(renderTimer)
-    renderTimer = setTimeout(render, 50)
-  } else {
-    // 流式时节流渲染（每 100ms）
-    if (!renderThrottle) {
-      renderThrottle = setTimeout(() => {
-        render()
-        renderThrottle = null
-      }, 100)
-    }
-  }
-}, { deep: true })
-
-let renderTimer: number
-let renderThrottle: number
-
-function render() {
-  if (!containerRef.value || !md.value) return
-  
-  const html = md.value.render(props.content)
-  containerRef.value.innerHTML = html
-  
-  // 代码高亮
-  containerRef.value.querySelectorAll('pre code').forEach((block) => {
-    hljs.highlightElement(block as HTMLElement)
-  })
-  
-  // Mermaid 渲染
-  containerRef.value.querySelectorAll('.mermaid').forEach((el) => {
-    mermaid.run({ nodes: [el] })
-  })
-  
-  // KaTeX 已由 markdown-it-katex 处理
-}
-</script>
-
-<template>
-  <div ref="containerRef" class="streaming-markdown" v-show="!isStreaming || content.length > 50">
-    <!-- 流式时显示光标 -->
-    <span v-if="isStreaming" class="cursor-blink" aria-hidden="true">█</span>
-  </div>
-  
-  <style scoped>
-  .streaming-markdown {
-    min-height: 200px;
-  }
-  .cursor-blink {
-    display: inline-block;
-    width: 2px;
-    height: 1.2em;
-    background: currentColor;
-    animation: blink 1s infinite;
-    margin-left: 2px;
-    vertical-align: text-bottom;
-  }
-  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
-  
-  /* 代码块复制按钮 */
-  pre { position: relative; }
-  pre::before {
-    content: "复制";
-    position: absolute;
-    top: 8px; right: 8px;
-    padding: 2px 8px;
-    font-size: 11px;
-    background: #374151;
-    color: #9ca3af;
-    border-radius: 4px;
-    opacity: 0;
-    transition: opacity 0.2s;
-  }
-  pre:hover::before { opacity: 1; }
-  pre:hover::before:hover { background: #4b5563; color: white; cursor: pointer; }
-  </style>
-</template>
+es.onerror = () => { /* close + 最多重试 5 次，退避 3000*(n+1) ms */ }
 ```
 
-### 5.4 证据卡片
+对应后端 `sse.py:22` 的 `GET /api/videos/pipeline/{media_id}/progress`。
 
-```vue
-<!-- components/analysis/EvidenceCard.vue -->
-<script setup lang="ts">
-import { computed } from 'vue'
+### 6.2 双通道设计
 
-interface Props {
-  evidence: Evidence
-}
+SSE 提供**实时增量事件**，同时以 5 秒间隔 REST 轮询 `pipelineApi.getStatus` 作为**兜底**——SSE 断线或事件丢失时，页面仍能从权威状态恢复。二者在 UI 上合并渲染为 9 阶段竖向 stepper + 总体进度条 + 实时事件日志。
 
-const props = defineProps<Props>()
+`ProgressEvent` 结构（`types/api.ts`）：
 
-// source ∈ {ASR, OCR},对应后端 Evidence.source
-const evidenceSourceIcons: Record<string, string> = {
-  ASR: 'waveform',
-  OCR: 'document-text'
-}
-
-const evidenceSourceLabels: Record<string, string> = {
-  ASR: '语音转录',
-  OCR: '画面文字'
-}
-
-// 由 timestamp_ms(ms)派生秒级时间,默认 10 秒窗口展示
-const startSec = computed(() => Math.floor(props.evidence.timestamp_ms / 1000))
-const endSec = computed(() => startSec.value + 10)
-
-function formatTimestamp(seconds: number) {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return `${h > 0 ? h + ':' : ''}${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`
-}
-
-function openVideoAtTimestamp() {
-  // 通过 chunk_id 跳转视频精确时间点(timestamp_ms 已派生秒级 t)
-  router.push({ name: 'VideoDetail', params: { chunkId: props.evidence.chunk_id }, query: { t: startSec.value } })
-}
-</script>
-
-<template>
-  <article class="evidence-card bg-white border border-gray-200 rounded-lg p-4 hover:border-primary-300 hover:shadow-md transition-all cursor-pointer" @click="openVideoAtTimestamp">
-    <div class="flex items-start gap-3">
-      <!-- 来源图标 -->
-      <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-primary-50 flex items-center justify-center">
-        <component :is="HeroIcon" :name="evidenceSourceIcons[props.evidence.source]" class="h-5 w-5 text-primary-600" />
-      </div>
-      
-      <!-- 内容 -->
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
-          <span class="px-2 py-0.5 bg-gray-100 rounded">{{ evidenceSourceLabels[props.evidence.source] }}</span>
-          <span class="font-mono">{{ formatTimestamp(startSec) }} - {{ formatTimestamp(endSec) }}</span>
-        </div>
-        
-        <p class="text-sm text-gray-700 line-clamp-3">{{ props.evidence.content }}</p>
-        
-        <!-- 证据 ID 与 chunk_id(chunk_id 用于跳转视频时间点)-->
-        <div class="mt-2 flex items-center gap-2 text-xs text-gray-400">
-          <kbd class="px-1.5 py-0.5 bg-gray-100 rounded font-mono">{{ props.evidence.evidence_id }}</kbd>
-          <span class="flex-1 truncate font-mono">chunk: {{ props.evidence.chunk_id }}</span>
-        </div>
-      </div>
-      
-    </div>
-  </article>
-</template>
+```ts
+{ stage: string; progress_pct: number; message: string; timestamp: string; metadata?: object }
 ```
 
 ---
 
-## 6. 键盘快捷键
+## 7. 主要画面
 
-```typescript
-// composables/useKeyboardShortcuts.ts
-export function useKeyboardShortcuts() {
-  const shortcuts: Record<string, { keys: string[], action: () => void, description: string }> = {
-    // 全局
-    'new-analysis': { keys: ['n'], action: () => router.push('/analysis'), description: '新建分析' },
-    'search': { keys: ['/'], action: () => focusSearch(), description: '聚焦搜索' },
-    'command-palette': { keys: ['meta', 'k'], action: () => openCommandPalette(), description: '命令面板' },
-    
-    // 视频库
-    'play-selected': { keys: ['enter'], action: () => playSelectedVideo(), description: '播放选中视频', context: 'library' },
-    'analyze-selected': { keys: ['a'], action: () => analyzeSelectedVideo(), description: '分析选中视频', context: 'library' },
-    'delete-selected': { keys: ['delete'], action: () => deleteSelectedVideo(), description: '删除选中视频', context: 'library' },
-    
-    // 分析工作台
-    'focus-goal': { keys: ['meta', 'enter'], action: () => focusGoalInput(), description: '聚焦分析目标输入', context: 'analysis' },
-    'copy-answer': { keys: ['meta', 'c'], action: () => copyAnswer(), description: '复制回答', context: 'analysis' },
-    'export-md': { keys: ['meta', 'e'], action: () => exportMarkdown(), description: '导出 Markdown', context: 'analysis' },
-    'new-session': { keys: ['meta', 'n'], action: () => router.push('/analysis'), description: '新建分析会话', context: 'analysis' },
-    
-    // 导航
-    'goto-library': { keys: ['g', 'l'], action: () => router.push('/library'), description: '去视频库' },
-    'goto-analysis': { keys: ['g', 'a'], action: () => router.push('/analysis'), description: '去分析工作台' },
-    'goto-rag': { keys: ['g', 'r'], action: () => router.push('/rag'), description: '去智能问答' },
-  }
-  
-  onMounted(() => {
-    window.addEventListener('keydown', handleKeydown)
-  })
-  
-  onUnmounted(() => {
-    window.removeEventListener('keydown', handleKeydown)
-  })
-  
-  function handleKeydown(e: KeyboardEvent) {
-    // 忽略输入框中的按键
-    if (isInputFocused(e.target as HTMLElement)) return
-    
-    for (const [id, shortcut] of Object.entries(shortcuts)) {
-      if (matchKeys(e, shortcut.keys)) {
-        e.preventDefault()
-        shortcut.action()
-        break
-      }
-    }
-  }
-  
-  function matchKeys(e: KeyboardEvent, keys: string[]): boolean {
-    return keys.every(k => {
-      if (k === 'meta') return e.metaKey || e.ctrlKey
-      if (k === 'shift') return e.shiftKey
-      if (k === 'alt') return e.altKey
-      return e.key.toLowerCase() === k.toLowerCase()
-    })
-  }
-  
-  function isInputFocused(el: HTMLElement): boolean {
-    return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
-  }
-}
-```
+| 页面 | 关键实现 |
+|---|---|
+| **Dashboard** | 健康卡片（`/health/ready`，30s 轮询）+ 4 个快捷入口 + 最近 `ready` 视频网格（可删除） |
+| **VideoUploadPage** | 双 Tab：URL / 本地文件。`react-hook-form` + `zodResolver`，本地 zod schema 校验（URL 格式；文件 ≤2GB 且 `video/*`）。URL 走 `pipelineApi.submit`，文件走 `pipelineApi.uploadFile`，成功后跳 `/videos/{id}/progress` |
+| **VideoLibraryPage** | 视频卡片网格 + 搜索 + 状态筛选 + 分页，**筛选条件同步到 URL search params**（可分享/回退）；缩略图走 YouTube CDN（`getVideoThumbnailUrl`）；删除带确认与错误横幅 |
+| **VideoDetailPage** | 阶段进度列表；`ready` 后展示 3 个 Tab：转写全文 / 分段（`useInfiniteQuery`，可展开）/ OCR 帧（`useInfiniteQuery`） |
+| **PipelineProgressPage** | 9 阶段 stepper（REST 状态 + SSE 事件合并）、总体进度、实时事件日志、断线重连（最多 5 次）、完成后跳详情 |
+| **RAGChatPage** | 乐观更新的用户气泡 → 助手气泡内嵌**可折叠证据卡片**（相关度百分比、时间区间 `start_ms-end_ms`、`evidence_id` 徽章、内容预览，定义于 `RAGChatPage.tsx:393-422`）；媒体范围选择器 + 推荐问题。**单次请求/响应，无流式** |
+| **AgentAnalysisPage** | 目标输入 + 最多 4 个 `ready` 视频选择 + `max_rounds`（1–3）；提交后 5 步状态流（`pending→planning→executing→critic_check→completed`）2 秒轮询；执行轨迹卡片（来自 checkpoints）；最终结果卡片（critic 通过/未通过徽章、成本、结论含置信度、证据列表、建议） |
+| **HealthDashboardPage** | PostgreSQL / Redis / Qdrant / MinIO 四张组件卡；30s 轮询；**recharts 折线图**展示可用性历史（客户端维护，上限 30 点）；手动刷新 + 异常横幅 |
+| **SettingsPage** | 开发用身份卡片、主题三态切换、默认模型、语言选择（乐观更新 + 失败回滚） |
 
 ---
 
-## 7. 样式规范
+## 8. UI 组件、样式与 i18n
 
-```css
-/* styles/tailwind.css */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+### 8.1 UI 原语（`components/ui/`）
 
-@layer components {
-  .btn-primary {
-    @apply px-4 py-2 bg-primary-600 text-white rounded-lg font-medium 
-           hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
-           disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
-  }
-  
-  .btn-secondary {
-    @apply px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg font-medium
-           hover:bg-gray-50 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
-           disabled:opacity-50 disabled:cursor-not-allowed transition-colors;
-  }
-  
-  .btn-ghost {
-    @apply px-3 py-1.5 text-gray-600 rounded-lg font-medium
-           hover:bg-gray-100 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
-           transition-colors;
-  }
-  
-  .input-field {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-lg
-           focus:ring-2 focus:ring-primary-500 focus:border-transparent
-           placeholder:text-gray-400 transition-shadow;
-  }
-  
-  .card {
-    @apply bg-white rounded-xl border border-gray-200 shadow-sm
-           hover:shadow-md transition-shadow;
-  }
-  
-  .prose {
-    @apply text-gray-900 leading-relaxed;
-  }
-  .prose h1 { @apply text-3xl font-bold mt-8 mb-4 text-gray-900; }
-  .prose h2 { @apply text-2xl font-semibold mt-8 mb-3 text-gray-900; }
-  .prose h3 { @apply text-xl font-medium mt-6 mb-2 text-gray-900; }
-  .prose p { @apply mb-4; }
-  .prose code { @apply bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-pink-600; }
-  .prose pre { @apply bg-gray-900 rounded-lg p-4 overflow-x-auto mb-4; }
-  .prose pre code { @apply bg-transparent p-0 text-gray-100; }
-  .prose blockquote { @apply border-l-4 border-primary-500 pl-4 italic text-gray-600 my-4; }
-  .prose ul { @apply list-disc list-inside mb-4 space-y-1; }
-  .prose ol { @apply list-decimal list-inside mb-4 space-y-1; }
-  .prose a { @apply text-primary-600 hover:underline; }
-  .prose table { @apply w-full border-collapse mb-4; }
-  .prose th, .prose td { @apply border border-gray-300 px-3 py-2 text-left; }
-  .prose th { @apply bg-gray-100 font-semibold; }
-}
-```
+`Button`（cva 变体 default/destructive/outline/secondary/ghost/link，Radix `Slot` 支持 `asChild`，内建 loading spinner）、`Badge`（含 success/warning/info）、`Card`（Card/Header/Title/Description/Content/Footer）、`Input`、`Label`、`Textarea`、`Progress`（纯 div 进度条）、`Tabs`（**手写**，非 Radix）。
+
+### 8.2 样式
+
+- `tailwind.config.ts`：`darkMode: ['class']`，shadcn 风格 **HSL CSS 变量**映射（`hsl(var(--primary))` 等），插件 `tailwindcss-animate`
+- `styles/globals.css`：`:root`（亮色）与 `.dark` 两套 token（主色 `221.2 83.2% 53.3%`）、`.prose` 组件层、`.scrollbar-hide` 工具类
+- PostCSS：`tailwindcss` + `autoprefixer`
+- Radix 仅直接依赖 `@radix-ui/react-scroll-area`（且只在未使用的 `ScrollArea.tsx` 中引用）；`Button` 用到的 `@radix-ui/react-slot` 为传递依赖
+- 图标 `lucide-react`；图表 `recharts`（仅健康看板）
+
+### 8.3 i18n
+
+`i18n/index.ts`：`i18next` + `initReactI18next` + `i18next-browser-languagedetector`。
+
+- 语言：**`en-US`（默认、fallback）与 `zh-CN`**，资源为静态导入的 JSON（各 337 行，15 个命名空间：`nav, app, header, videoLibrary, videoCard, dashboard, settings, ragChat, agentAnalysis, pipeline, health, videoUpload, videoDetail, placeholder, utils`）
+- 检测顺序 `['localStorage', 'navigator']`，缓存键 `i18next_lng`
+- `LanguageContext` 提供 `{currentLanguage, setLanguage}`，并用 `hasSyncedRef` 守卫**一次性**从 DB（`GET /user/config`）同步语言
+- 阶段/状态标签以 i18n **key** 形式存于 `lib/utils.ts:91-102` 的 `STAGE_LABELS`，随语言响应式切换
 
 ---
 
-## 8. 环境变量
+## 9. 类型定义
 
-```env
-# .env
-VITE_API_BASE_URL=http://localhost:8000/api/v1
-VITE_WS_BASE_URL=ws://localhost:8000
-VITE_APP_TITLE=VideoMind
-VITE_ENABLE_MOCK=false
-```
+全部 DTO 集中在 `frontend/src/types/api.ts`（296 行），以 **Zod schema + `z.infer`** 书写。
+
+> ⚠️ **这些 schema 只作为类型推导来源，运行时从不执行校验**——`api.ts` 以 `import type` 引入，源码中无任何 `.parse(` 调用。唯一运行时使用 Zod 的地方是 `VideoUploadPage.tsx:19-31` 的表单局部 schema。
+
+关键类型：`MediaStatus`（`pending / downloading / downloaded / transcoding / transcoded / asr / ocr / indexing / ready / failed`）、`AnalysisStatus`（`pending / planning / executing / critic_check / completed / failed`）、`ProgressEvent`、`MediaFileResponse`、`VideoSegmentResponse`、`OCRResultResponse`、`AnalysisTaskRequest`（`goal` ≤5000、`media_ids` 1–4、`max_rounds` 1–3）、`AgentResultResponse`（`conclusions_json` / `evidence_json` / `suggestions_json` / `critic_passed` / `critic_feedback` / `token_usage` / `cost_usd`）、`HealthReadyResponse`、`RagChatResponse`、`UserConfig`。
 
 ---
 
-## 9. 部署构建
+## 10. 测试
 
-```yaml
-# docker/frontend.Dockerfile
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
+| 层 | 工具 | 状态 |
+|---|---|---|
+| **L1 冒烟** | Playwright `tests/e2e/smoke.spec.ts` | 5 个页面外壳渲染 + 真实请求 `/api/health/ready`、`/api/user/config`（后端离线时跳过） |
+| **L2 契约** | Playwright `tests/e2e/api-contract.spec.ts` | 10 个 endpoint 的响应结构固定（直连后端 `http://localhost:8002`），含 404/400 错误路径 |
+| **L3 全链路** | Playwright `tests/e2e/full-chain.spec.ts` | 由 `VM_E2E_FULL=1` + 就绪媒体门控：上传→SSE→详情→Agent 分析→轮询→结果→RAG |
+| 单元测试 | Vitest + Testing Library | **已配置但零测试文件**（`vitest.config.ts` include `src/**/*.test.{ts,tsx}`，实际无匹配） |
 
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-```nginx
-# nginx.conf
-server {
-    listen 80;
-    server_name localhost;
-    root /usr/share/nginx/html;
-    index index.html;
-    
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-    
-    location /api/ {
-        proxy_pass http://backend:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-    
-    # SSE 专用配置
-    location /api/v1/tasks/ {
-        proxy_pass http://backend:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_cache off;
-        proxy_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-    
-    gzip on;
-    gzip_types text/plain application/javascript application/json text/css;
-}
-```
+`playwright.config.ts`：仅 chromium，`baseURL http://localhost:4000`，`webServer: npm run dev`（非 CI 下复用已启动服务），超时 60s。
 
 ---
 
-> **关联文档**：[ARCHITECTURE.md](ARCHITECTURE.md) · [AGENT-LOOP.md](AGENT-LOOP.md) · [RAG-RETRIEVAL.md](RAG-RETRIEVAL.md) · [TASK-ORCHESTRATION.md](TASK-ORCHESTRATION.md) · [DEPLOYMENT.md](DEPLOYMENT.md)
+## 11. 开发与构建
+
+```bash
+cd frontend
+npm install
+npm run dev        # Vite dev server → http://127.0.0.1:4000（strictPort）
+npm run build      # tsc -b && vite build
+npm run typecheck  # tsc --noEmit
+npm run lint       # eslint --max-warnings 0
+npm run test:e2e   # playwright test
+```
+
+### ⚠️ `vite.config.js` 与 `vite.config.ts` 并存
+
+Vite 5 按 `DEFAULT_CONFIG_FILES` 顺序解析配置，**`vite.config.js` 排在 `.ts` 之前**，因此**实际生效的是 `vite.config.js`**（`vite.config.ts` 被完全忽略）。
+
+两者仅有一处实质差异——**proxy 目标**：
+
+| 文件 | 生效 | proxy `/api`、`/sse` 目标 |
+|---|---|---|
+| `vite.config.js` | ✅ **实际生效** | `http://127.0.0.1:8011` |
+| `vite.config.ts` | ❌ 被忽略 | `http://127.0.0.1:8002` |
+
+**后果**：本地联调时后端必须监听 **8011**；而 `playwright.config.ts` 与 `tests/e2e/lib.ts` 假设后端在 **8002**——两处端口不一致，是当前待清理的技术债。
+
+其余生效配置：端口 `4000`、`strictPort: true`、host `127.0.0.1`、插件 `@vitejs/plugin-react`、别名 `@ → src`（含 `@/components`、`@/features`、`@/hooks`、`@/lib`、`@/store`、`@/types`，其中 `@/store` 指向不存在的目录）。
+
+---
+
+## 12. 未实装 / 设计稿遗留
+
+以下内容出现在早期 Vue 设计稿中，**当前代码并未实现**。列出以免误导：
+
+| 设计稿内容 | 实际状况 |
+|---|---|
+| 流式 Markdown 渲染器（`StreamingMarkdown`，含 KaTeX / Mermaid / 代码高亮 / 光标动画） | **未实现**。`markdown-it`、`highlight.js` 在 `dependencies` 中但**源码零引用**；助手消息以 `<p className="whitespace-pre-wrap">{content}</p>` 纯文本渲染（`RAGChatPage.tsx:346`） |
+| Zustand store（`useVideoLibraryStore` / `useTaskMonitorStore`） | **未实现**。无 store 文件、无 import；状态由 TanStack Query + 局部 `useState` 承担 |
+| 全局键盘快捷键（`useKeyboardShortcuts`，含 `g l` / `g a` / `Cmd+K` 命令面板） | **未实现** |
+| SSE 任务监控 Store（`EventSource` Map + `mitt` 事件总线 + 自动重连） | **未实现**。实际为页面内联 `EventSource`，具名 `progress` 事件 + REST 轮询兜底 |
+| RAG 答案 token 级流式输出 | **未实现**。`POST /rag/chat` 单次请求/响应，整段返回后渲染 |
+| `ScrollArea`（Radix）、`PlaceholderPage` | 组件已写但**无任何引用** |
+| `hooks/useApi.ts`（QUERY_KEYS + 20 hooks）、`hooks/useSSE.ts`、`lib/endpoints.ts` | 均已实现但**无任何引用**——页面各自内联 `useQuery`/`useMutation` + 字符串字面量 key |
+| 独立 `EvidenceCard.vue` 组件 | 实际为 `RAGChatPage.tsx:393-422` 内联定义 |
+| `/api/v1/...` 路径前缀 | 实际为 `/api` |
+| nginx + Docker 前端镜像 | 仓库中**不存在** `docker/frontend.Dockerfile` / `nginx.conf`；前端目前仅本地 `npm run dev` 运行 |
+
+---
+
+## 13. 已知不整合
+
+| # | 问题 | 影响 |
+|---|---|---|
+| 1 | `vite.config.js` / `vite.config.ts` 并存，`.js` 生效 | 改 `.ts` 无任何效果；proxy 端口与 Playwright 假设不一致（见 §11） |
+| 2 | `@/store` 别名指向不存在的目录 | 引用该别名会构建失败 |
+| 3 | 4 个依赖（zustand / markdown-it / highlight.js / date-fns）+ 5 个文件为死代码 | 包体积与维护噪声 |
+| 4 | Vitest 已配置但零测试文件 | `npm test` 无实际校验能力 |
+| 5 | 无登录流程：仅有 token 注入拦截器，身份来自 `GET /user/config` 的开发用户 | 无法验证鉴权路径 |
+| 6 | `frontend/test-upload.cjs`、`test-upload.spec.ts` 为残留脚本，指向已废弃端口 | 易误用 |
+| 7 | `frontend.log`、`dist/`、`tsconfig*.tsbuildinfo` 为构建/运行残留 | 建议加入 `.gitignore` |
+
+---
+
+## 14. 参考
+
+- 后端接口契约：[ARCHITECTURE.md](ARCHITECTURE.md)、[TASK-ORCHESTRATION.md](TASK-ORCHESTRATION.md)
+- 设计↔实现的整体偏离记录：[DECISIONS.md](DECISIONS.md)
+- RAG 证据数据结构：[RAG-RETRIEVAL.md](RAG-RETRIEVAL.md)
+- Agent 结果结构：[AGENT-LOOP.md](AGENT-LOOP.md)
