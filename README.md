@@ -217,19 +217,19 @@ cd frontend && npm install && npm run dev
 
 | ドキュメント | 内容 |
 |---|---|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 全体構成、データフロー、技術選定理由、GPU スケジューリング |
-| [DATA-MODEL.md](docs/DATA-MODEL.md) | テーブル定義、ER 図、インデックス戦略、マイグレーション |
-| [VIDEO-PIPELINE.md](docs/VIDEO-PIPELINE.md) | ダウンロード → トランスコード → セグメント ASR → キーフレーム OCR → 結合 |
-| [RAG-RETRIEVAL.md](docs/RAG-RETRIEVAL.md) | ハイブリッド検索、RRF 融合、再ランキング、引用追跡 |
-| [AGENT-LOOP.md](docs/AGENT-LOOP.md) | Planner → Executor → Critic、エビデンス検証、チェックポイント |
-| [MODEL-GATEWAY.md](docs/MODEL-GATEWAY.md) | 三態サーキットブレーカー、優先度ルーティング、トークン課金 |
-| [TASK-ORCHESTRATION.md](docs/TASK-ORCHESTRATION.md) | Celery + Redis、状態遷移、冪等性、リトライ予算、SSE |
-| [INTENT-ROUTING.md](docs/INTENT-ROUTING.md) | 意図認識ツリー、クエリ書き換え、マルチチャネル検索 |
-| [FRONTEND.md](docs/FRONTEND.md) | ルーティング、状態管理、API 層、SSE 進捗、画面構成、テスト |
-| [SECURITY.md](docs/SECURITY.md) | JWT 認証、API キーの AES-GCM 暗号化、レート制限、監査ログ |
-| [OBSERVABILITY.md](docs/OBSERVABILITY.md) | 構造化ログ、Prometheus、トレーシング、評価フレームワーク |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker Compose、環境変数、GPU パススルー、ローカル展開 |
-| [DECISIONS.md](docs/DECISIONS.md) | 設計上の意思決定記録（採用理由と却下理由） |
+| [ARCHITECTURE_JP.md](docs/ARCHITECTURE_JP.md) | 全体構成、データフロー、技術選定理由、GPU スケジューリング |
+| [DATA-MODEL_JP.md](docs/DATA-MODEL_JP.md) | テーブル定義、ER 図、インデックス戦略、マイグレーション |
+| [VIDEO-PIPELINE_JP.md](docs/VIDEO-PIPELINE_JP.md) | ダウンロード → トランスコード → セグメント ASR → キーフレーム OCR → 結合 |
+| [RAG-RETRIEVAL_JP.md](docs/RAG-RETRIEVAL_JP.md) | ハイブリッド検索、RRF 融合、再ランキング、引用追跡 |
+| [AGENT-LOOP_JP.md](docs/AGENT-LOOP_JP.md) | Planner → Executor → Critic、エビデンス検証、チェックポイント |
+| [MODEL-GATEWAY_JP.md](docs/MODEL-GATEWAY_JP.md) | 三態サーキットブレーカー、優先度ルーティング、トークン課金 |
+| [TASK-ORCHESTRATION_JP.md](docs/TASK-ORCHESTRATION_JP.md) | Celery + Redis、状態遷移、冪等性、リトライ予算、SSE |
+| [INTENT-ROUTING_JP.md](docs/INTENT-ROUTING_JP.md) | 意図認識ツリー、クエリ書き換え、マルチチャネル検索 |
+| [FRONTEND_JP.md](docs/FRONTEND_JP.md) | ルーティング、状態管理、API 層、SSE 進捗、画面構成、テスト |
+| [SECURITY_JP.md](docs/SECURITY_JP.md) | JWT 認証、API キーの AES-GCM 暗号化、レート制限、監査ログ |
+| [OBSERVABILITY_JP.md](docs/OBSERVABILITY_JP.md) | 構造化ログ、Prometheus、トレーシング、評価フレームワーク |
+| [DEPLOYMENT_JP.md](docs/DEPLOYMENT_JP.md) | Docker Compose、環境変数、GPU パススルー、ローカル展開 |
+| [DECISIONS_JP.md](docs/DECISIONS_JP.md) | 設計上の意思決定記録（採用理由と却下理由） |
 
 ---
 
