@@ -53,3 +53,6 @@ frontend/test-upload.spec.ts
 # 覆盖率数据文件
 .coverage
 coverage.xml
+
+# ───────── 顶层方案文档（本地保留，不入库）─────────
+/videomind-python方案.md
